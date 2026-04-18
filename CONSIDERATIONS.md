@@ -2,6 +2,36 @@
 
 Read this before running the planning chain at scale. Most of it is environment setup; the last two sections explain the reflection corpus and the review pattern.
 
+## What each skill does
+
+### Planning chain (use in order)
+
+- **phase-roadmap-builder** — Turns a conversation (or a pointer to a markdown spec) into `specs/phase-plans-v<N>.md`, a multi-phase roadmap consumable by `plan-phase`. Append-mode adds phases to an existing roadmap without editing prior ones. Decomposition rules push for maximum parallelism: fewer phases with more sibling lanes, tight early interface freezes, and explicit cross-phase parallel branches in the DAG.
+
+- **plan-phase** — Takes one phase from the roadmap and decomposes it into swim lanes with disjoint file ownership, lane-level task lists (test → impl → verify), and interface-freeze gates. Emits a `TaskCreate` per lane so the lane DAG is visible in your task pane. With `--consensus`, spawns 2-3 Plan teammates with different architectural framings (minimal / clean / parallel) and synthesizes.
+
+- **execute-phase** — Reads a plan-phase output and drives execution. Spawns one worktree-isolated teammate per lane, dispatches lanes in parallel when dependencies allow, auto-merges each lane on green verify, retries once on failure, halts the phase on second failure. Routes lanes to model tiers (frontier / strong / fast) based on complexity.
+
+- **task-contextualizer** — A checklist, not an active workflow. Loads into context and reminds the agent to include file paths, architecture context, scope boundary, expected output, and related files in every subagent brief. The three pipeline skills already reference it in their briefing steps; invoke it directly if you're about to write any ad-hoc `Task`/`Agent` call.
+
+### Efficiency kit (passive anti-pattern prevention)
+
+These don't run workflows. They load into context and steer you away from the most common token-wasting habits.
+
+- **file-read-cache** — Don't re-read a file you already read in this conversation unless it's been modified since. Addresses the most common source of duplicate tool calls.
+
+- **safe-edit** — Pre-flight checklist before every Edit/Write: have I Read this file? Has anything modified it since? Is my `old_string` unique? Am I preserving exact indentation? Prevents the most common edit failures.
+
+- **batch-verify** — When editing 3+ related files for the same change, complete ALL edits first, then verify ONCE (tsc, pytest, etc.). Intermediate verification on partial refactors just reports errors in files you haven't fixed yet.
+
+- **smart-search** — Decision tree + ripgrep-escaping rules for Grep/Glob. If you'd need 4+ Grep calls to answer a question, use an Explore agent instead. Before a second search on the same topic, stop and diagnose the first failure — don't thrash.
+
+- **diagnose-bash-error** — When a Bash command fails, read the full stderr and categorize by exit code before retrying. Prevents the "try different flags until it works" anti-pattern.
+
+- **validate-before-bash** — Before the first `tsc`, `pytest`, `cargo build`, `flutter analyze` in a session: run a preflight checking tool-installed, config-file-present, deps-installed. Catches predictable failures before eating the tool's slow startup time.
+
+- **detect-environment** — One-pass detection of Python (system / venv / poetry / uv), Node, TypeScript, Dart, Rust, Git, Docker, Java at session start. Caches the result so you don't chain `which` → `whereis` → `type` → `find /` for every tool lookup.
+
 ## Target harness
 
 The skills are written for **[Claude Code](https://docs.claude.com/en/docs/claude-code/overview)**. They use these Claude Code-specific tools:
