@@ -56,9 +56,9 @@ Usage:
 
 ```bash
 python3 next_reflection_path.py <skill-name>
-# → /home/<user>/.claude/cache/reflections/<skill-name>/<skill-name>-reflection-v<N>.md
+# → /home/<user>/.claude/skills/<skill-name>/reflections/<skill-name>-reflection-v<N>.md
 ```
 
-Globs existing `<skill>-reflection-v*.md` files and returns the next incrementing version. Creates the parent directory if absent.
+Globs existing `<skill>-reflection-v*.md` files in the skill's `reflections/` subdir and returns the next incrementing version. Creates the parent directory if absent. Because `~/.claude/skills/<skill>/` is typically a symlink to the source repo, the file physically lands in the source repo (gitignored per `.gitignore`).
 
 Required by the close-out reflection step in every artifact-producing planning-chain skill.

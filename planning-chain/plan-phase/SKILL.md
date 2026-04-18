@@ -66,6 +66,19 @@ ToolSearch(query: "select:TaskCreate,AskUserQuestion,ExitPlanMode")
 
 The main thread is an orchestrator only: brief specialists, synthesize output, enforce consensus, write the final doc, emit tasks. See `## Teamwork & delegation posture` for the posture rules.
 
+### Step 0 — Read predecessor handoff (if present)
+
+The predecessor skill may be either:
+
+- `phase-roadmap-builder` (first time planning a phase against a new roadmap) → `~/.claude/skills/phase-roadmap-builder/handoff.md`
+- `execute-phase` (planning the next phase after a prior one finished executing) → `~/.claude/skills/execute-phase/handoff.md`
+
+Check both paths. If both exist, pick the one with the newer `timestamp:` in its metadata header. If only one exists, use it. If neither, proceed standalone.
+
+Validate the handoff: `from:` must match the expected predecessor; timestamp should be recent (<7 days). On mismatch or staleness, flag via `AskUserQuestion` with `[use anyway, ignore, abort]`.
+
+Fold the handoff's "Open items" and "Repo-specific gotchas" into the brief given to Step 2's Explore teammates so they know what to watch for.
+
 ### Step 1 — Resolve spec path, phase, and PHASE_ID
 
 **Spec path resolution (in order):**
@@ -326,39 +339,79 @@ After `ExitPlanMode` is approved, before exiting:
 
 `execute-phase`'s preflight will reject a dirty tree on its next invocation; this step exists to prevent that.
 
-## Close-out — Reflection
+## Close-out — Reflection + Handoff
 
-After artifacts are committed, spawn a reflection agent using the `frontier` tier (resolve via `execute-phase` Model tiers table):
+After artifacts are committed, resolve paths:
+
+```bash
+REFLECTION_PATH=$(python3 ~/.claude/skills/_shared/next_reflection_path.py plan-phase)
+HANDOFF_PATH=~/.claude/skills/plan-phase/handoff.md
+SKILL_MD=~/.claude/skills/plan-phase/SKILL.md
+```
+
+Spawn ONE close-out agent using the `frontier` tier. It writes BOTH files directly via the Write tool:
 
 ```
 Agent(
   subagent_type: "general-purpose",
   model: "<frontier-model-id>",
-  name: "plan-phase-reflection",
+  name: "plan-phase-closeout",
   prompt: """
-    Review the skill at <absolute-path-to-plan-phase/SKILL.md> and the
-    current execution transcript.
+    Review the skill at <SKILL_MD> and the current execution transcript.
+    Produce TWO files via the Write tool.
 
-    Produce REPO-AGNOSTIC feedback on the skill itself. Do not reference
-    this specific project, codebase, file names, or domain — reflect only
-    on how the skill's instructions performed.
+    FILE 1 — REPO-AGNOSTIC reflection → write to <REFLECTION_PATH>
 
-    Output:
-    # plan-phase reflection — <ISO timestamp>
+      # plan-phase reflection — <ISO timestamp>
 
-    ## What worked
-    - <bullet>
+      ## What worked
+      - <bullet, about the SKILL's instructions>
 
-    ## Improvements to SKILL.md
-    - <specific, actionable change to the instructions>
+      ## Improvements to SKILL.md
+      - <specific, actionable change to the instructions>
+
+      Do NOT reference this project, codebase, filenames, or domain.
+      Feedback is about how the skill's instructions performed, for a
+      future meta-skill that digests reflections across runs.
+
+    FILE 2 — REPO-SPECIFIC handoff → write to <HANDOFF_PATH> (overwrites
+    any prior handoff from this skill)
+
+      ---
+      from: plan-phase
+      timestamp: <ISO>
+      artifact: <absolute path to plan doc + reviews if any>
+      ---
+
+      # Handoff for execute-phase
+
+      ## Summary
+      <2-3 sentences: phase planned, lanes count, plan doc path.>
+
+      ## Key decisions made this run
+      - <numbered, one line each — lane boundaries, IF-freeze signatures,
+        consensus outcomes if --consensus was used>
+
+      ## Open items for execute-phase
+      - <concrete — e.g., "SL-2 depends on SL-1's StoreRegistry.get
+        signature; ensure lane ordering in dispatch">
+
+      ## Repo-specific gotchas surfaced
+      - <quirks of THIS codebase discovered during planning>
+
+      ## Files committed this run
+      - <path> @ <commit sha>
+
+      ## Execute-phase's likely scope
+      - <file globs from Owned files across lanes>
   """
 )
 ```
 
-Write the reply to the path emitted by:
+After the agent returns, print to the user:
 
-```bash
-python3 "$(git rev-parse --show-toplevel)/.claude/skills/_shared/next_reflection_path.py" plan-phase
-```
-
-Surface to the user: "Reflection saved to <path>."
+> Plan written to `<plan-doc-path>`.
+> Reflection saved to `<REFLECTION_PATH>`.
+> Handoff written to `<HANDOFF_PATH>`.
+>
+> Recommended next step: run `/clear` to reset your context window, then invoke `/execute-phase <alias>`. The next skill reads the handoff automatically.

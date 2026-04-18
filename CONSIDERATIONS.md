@@ -105,17 +105,32 @@ Add these to your `.gitignore`:
 
 The state file holds progress for `--resume` on halt. On clean completion, it's deleted.
 
-## Reflection corpus (and the meta-skill vision)
+## Close-out: reflection + handoff
 
-After every artifact-producing skill finishes (`phase-roadmap-builder`, `plan-phase`, `execute-phase`), a frontier-tier Agent reviews **the skill itself and its execution transcript** and writes feedback to:
+Every artifact-producing skill (`phase-roadmap-builder`, `plan-phase`, `execute-phase`) spawns a single frontier-tier Agent at close-out. That Agent reviews the skill's instructions and the execution transcript and writes **two** files into the skill's own directory:
 
-```
-~/.claude/cache/reflections/<skill>/<skill>-reflection-v<N>.md
-```
+1. **Repo-agnostic reflection** → `~/.claude/skills/<skill>/reflections/<skill>-reflection-v<N>.md`
+   - Version `N` increments on each run.
+   - Strictly about the skill's *instructions* — no references to the project, codebase, file names, or domain.
+   - Two sections: "What worked" and "Improvements to SKILL.md."
+   - **Why**: a future meta-skill (not in this repo yet) will digest this corpus across skills and runs and propose concrete SKILL.md changes.
 
-Version `N` increments over prior reflections. Content is strictly **repo-agnostic** — the reflection Agent is instructed to critique the skill's *instructions*, not the specific project, codebase, file names, or domain. The output has two sections: "What worked" and "Improvements to SKILL.md."
+2. **Repo-specific handoff** → `~/.claude/skills/<skill>/handoff.md`
+   - Single file, overwritten each run.
+   - Concrete: summary of what was produced, key decisions, open items for the next skill, repo-specific gotchas discovered, files committed this run.
+   - Starts with a metadata header (`from:` + `timestamp:` + `artifact:`) so the next skill can validate predecessor identity and freshness.
 
-**Why**: the reflections build a corpus. A future meta-skill (not in this repo yet) will digest the corpus across skills and across reflections and propose concrete SKILL.md changes. That's the payoff. If you fork this repo, adopt the same pattern in your own skills so your reflections feed the same corpus.
+**Chain reads** (Step 0 of each artifact-producing skill):
+
+- `phase-roadmap-builder` ← `~/.claude/skills/execute-phase/handoff.md` (previous cycle's output, useful for roadmap extensions).
+- `plan-phase` ← whichever of `phase-roadmap-builder/handoff.md` or `execute-phase/handoff.md` is newer (first run of a roadmap vs. next phase after execution).
+- `execute-phase` ← `~/.claude/skills/plan-phase/handoff.md`.
+
+**User workflow at skill exit**: close-out prints the handoff + reflection paths and tells the user to run `/clear` before invoking the next skill. The next skill reads the predecessor's handoff automatically, so the new context window starts with only the relevant state — no inherited chatter.
+
+**Where the files physically live**: `~/.claude/skills/<skill>/` is a symlink to the skill's source repo (either this clone or wherever `install.sh` points). Reflection and handoff files land in that source repo via the symlink. The repo's `.gitignore` excludes `*/reflections/` and `*/handoff.md` so they don't pollute git history — but they stay visible on disk for review. If repo-specific content ever leaks into a reflection that's supposed to be repo-agnostic, you'll spot it immediately by browsing the skill dir.
+
+If you fork this repo, keep the same pattern in your own skills so your reflections feed the same corpus and your handoffs work with the chain.
 
 ## Directive-only writing style
 

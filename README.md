@@ -58,7 +58,7 @@ The skills follow five rules worth calling out so forks preserve them:
 1. **Directive-only instructions.** No war stories, no stats, no narrative justification. Rules in imperative form. Reasons stated in one clause, not paragraphs. The `_template/` directory codifies this.
 2. **Maximum parallelism.** Phases are serial checkpoints; lanes within a phase are parallel. The roadmap decomposition rules push for fewer phases with more lanes and the tightest possible early interface freezes.
 3. **Clean-tree close-out.** Every artifact-producing skill commits its output before exiting, so the next skill in the chain starts with a clean tree.
-4. **Repo-agnostic reflection corpus.** Each artifact-producing skill writes a reflection to `~/.claude/cache/reflections/<skill>/<skill>-reflection-v<N>.md` after close-out — feedback strictly about the skill's *instructions*, never about the repo it was run in. The long-term goal is a meta-skill that digests this corpus across skills and proposes improvements.
+4. **Reflection + handoff close-out.** Each artifact-producing skill writes two files at close-out: a repo-agnostic reflection (`~/.claude/skills/<skill>/reflections/<skill>-reflection-v<N>.md`, versioned, fuel for a future meta-skill) and a repo-specific handoff (`~/.claude/skills/<skill>/handoff.md`, overwritten each run, read by the next skill in the chain). The `/clear`-then-next-skill pattern lets each new agent start with a fresh context window while still picking up exactly where the previous one left off.
 5. **External review over multi-harness consensus.** Claude authors the plan. Gemini and Codex critique it in parallel. Agreements get attention; divergences are context for the human.
 
 ## Contributing

@@ -4,9 +4,14 @@
 Usage:
     next_reflection_path.py <skill-name>
 
-Globs ~/.claude/cache/reflections/<skill>/<skill>-reflection-v*.md and prints
-the next path at v<N+1>. v1 on first run. Creates the parent directory if
-absent (safe to use with a naive `write_text(path)` downstream).
+Globs ~/.claude/skills/<skill>/reflections/<skill>-reflection-v*.md and
+prints the next path at v<N+1>. v1 on first run. Creates the parent
+directory if absent.
+
+The path physically resolves through whatever ~/.claude/skills/<skill>/
+symlinks to (dotfiles, claude-code-skills clone, or a local copy). Repos
+should gitignore `<skill>/reflections/` so these files don't pollute
+history.
 """
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ VERSION_RE = re.compile(r"-reflection-v(\d+)\.md$")
 
 
 def next_reflection_path(skill_name: str) -> Path:
-    base = Path.home() / ".claude" / "cache" / "reflections" / skill_name
+    base = Path.home() / ".claude" / "skills" / skill_name / "reflections"
     base.mkdir(parents=True, exist_ok=True)
     max_version = 0
     for existing in base.glob(f"{skill_name}-reflection-v*.md"):

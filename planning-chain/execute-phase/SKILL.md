@@ -63,6 +63,14 @@ ToolSearch(query: "select:TaskCreate,TaskUpdate,TaskList,TeamCreate,AskUserQuest
 
 The main thread reads exactly two things: the plan doc and the TaskList. It does not Grep/Read repo source — lane teammates own their files. If the main thread is reaching for Grep or Read on source files, the teammate brief was incomplete; re-brief via `SendMessage`.
 
+### Step 0 — Read predecessor handoff (if present)
+
+Check `~/.claude/skills/plan-phase/handoff.md`. If it exists, `Read` it in full — `plan-phase` just produced the lane plan and may have flagged gotchas the dispatch loop needs to know about. Validate: `from:` must be `plan-phase`; timestamp <7 days. On mismatch or staleness, flag via `AskUserQuestion` with `[use anyway, ignore, abort]`.
+
+Fold the handoff's "Open items" and "Repo-specific gotchas" into each lane teammate's brief (Step 5's Teammate brief contents) so they carry the same context without the user having to reinject it.
+
+If absent, proceed standalone — the plan doc is authoritative either way.
+
 ### Step 1 — Resolve + parse plan doc
 
 Resolve in order: `$PLAN_DOC` → `<plan-path>` arg → default path built from `$PLAN_VERSION` + phase alias argument.
@@ -299,42 +307,86 @@ After all lanes merged:
 
 **Halt exception**: on Step 8 second-failure halt, `.claude/execute-phase-state.json` persists for `--resume`. This is the documented dirty-tree exception; no commit required.
 
-### Step 9.5 — Close-out: Reflection
+### Step 9.5 — Close-out: Reflection + Handoff
 
-After final summary, spawn a reflection agent using the `frontier` tier (see Model tiers table above):
+After final summary, resolve paths:
+
+```bash
+REFLECTION_PATH=$(python3 ~/.claude/skills/_shared/next_reflection_path.py execute-phase)
+HANDOFF_PATH=~/.claude/skills/execute-phase/handoff.md
+SKILL_MD=~/.claude/skills/execute-phase/SKILL.md
+```
+
+Spawn ONE close-out agent using the `frontier` tier. It writes BOTH files directly via the Write tool:
 
 ```
 Agent(
   subagent_type: "general-purpose",
   model: "<frontier-model-id>",
-  name: "execute-phase-reflection",
+  name: "execute-phase-closeout",
   prompt: """
-    Review the skill at <absolute-path-to-execute-phase/SKILL.md> and the
-    current execution transcript.
+    Review the skill at <SKILL_MD> and the current execution transcript.
+    Produce TWO files via the Write tool.
 
-    Produce REPO-AGNOSTIC feedback on the skill itself. Do not reference
-    this specific project, codebase, file names, or domain — reflect only
-    on how the skill's instructions performed.
+    FILE 1 — REPO-AGNOSTIC reflection → write to <REFLECTION_PATH>
 
-    Output:
-    # execute-phase reflection — <ISO timestamp>
+      # execute-phase reflection — <ISO timestamp>
 
-    ## What worked
-    - <bullet>
+      ## What worked
+      - <bullet, about the SKILL's instructions>
 
-    ## Improvements to SKILL.md
-    - <specific, actionable change to the instructions>
+      ## Improvements to SKILL.md
+      - <specific, actionable change to the instructions>
+
+      Do NOT reference this project, codebase, filenames, or domain.
+
+    FILE 2 — REPO-SPECIFIC handoff → write to <HANDOFF_PATH> (overwrites
+    any prior handoff from this skill)
+
+      ---
+      from: execute-phase
+      timestamp: <ISO>
+      artifact: <phase alias that was executed, merge-commit SHAs>
+      ---
+
+      # Handoff for the next skill
+
+      The next skill in the chain is usually `/plan-phase` for the
+      subsequent phase, or `/phase-roadmap-builder` if the user is
+      appending new phases to the roadmap.
+
+      ## Summary
+      <2-3 sentences: which phase completed, how many lanes merged,
+      final verification state.>
+
+      ## Key decisions made this run
+      - <numbered, one line each — salvaged commits, retry outcomes,
+        which lanes needed escalated models>
+
+      ## Open items for the next skill
+      - <concrete — e.g., "Phase P2A is next; its Interfaces consumed
+        list references IF-0-P1-1 which was frozen with signature X">
+
+      ## Repo-specific gotchas surfaced
+      - <surprises this run: slow tests, flaky browser checks,
+        unexpected module coupling, quirks worth knowing>
+
+      ## Files committed this run
+      - <merge-commit SHAs, with lane ID and brief description>
+
+      ## Next skill's likely scope
+      - <forecast of what plan-phase / phase-roadmap-builder will touch next>
   """
 )
 ```
 
-Write the reply to the path emitted by:
+After the agent returns, print to the user:
 
-```bash
-python3 "$(git rev-parse --show-toplevel)/.claude/skills/_shared/next_reflection_path.py" execute-phase
-```
-
-Surface to the user: "Reflection saved to <path>."
+> Phase `<alias>` complete. `<N>` lanes merged; final verification `<pass|fail>`.
+> Reflection saved to `<REFLECTION_PATH>`.
+> Handoff written to `<HANDOFF_PATH>`.
+>
+> Recommended next step: run `/clear` to reset your context window, then invoke `/plan-phase <next-alias>` (or `/phase-roadmap-builder` to extend the roadmap). The next skill reads the handoff automatically.
 
 ## Lane state machine
 

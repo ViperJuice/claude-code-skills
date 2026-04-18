@@ -11,3 +11,9 @@ __pycache__/
 
 # Local testing
 .claude/
+
+# Skill close-out artifacts (per-skill, generated each run)
+planning-chain/*/reflections/
+planning-chain/*/handoff.md
+efficiency-kit/*/reflections/
+efficiency-kit/*/handoff.md
