@@ -32,6 +32,10 @@ These don't run workflows. They load into context and steer you away from the mo
 
 - **detect-environment** — One-pass detection of Python (system / venv / poetry / uv), Node, TypeScript, Dart, Rust, Git, Docker, Java at session start. Caches the result so you don't chain `which` → `whereis` → `type` → `find /` for every tool lookup.
 
+- **smart-screenshot** — Rules for browser automation: use `browser_snapshot()` for finding elements and taking actions (fast, text-based); use `browser_take_screenshot()` only for visual verification. Prevents "screenshot → zoom → screenshot" thrashing and blind retries when screenshots fail.
+
+- **page-load-monitor** — When a browser navigation or screenshot fails, do escalating *diagnosis* (console errors, network requests) instead of escalating retries. After 2 failures, identify the cause — dev server down, 503 from backend, JS build error, wrong URL — and surface to the user instead of retrying a 4th time.
+
 ## Target harness
 
 The skills are written for **[Claude Code](https://docs.claude.com/en/docs/claude-code/overview)**. They use these Claude Code-specific tools:
