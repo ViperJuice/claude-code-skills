@@ -38,7 +38,7 @@ Then in any Claude Code session:
 
 ## What's in the box
 
-- **planning-chain/** — the four flagship skills: `phase-roadmap-builder`, `plan-phase`, `execute-phase`, `task-contextualizer`.
+- **planning-chain/** — the four flagship skills of the pipeline (`phase-roadmap-builder`, `plan-phase`, `execute-phase`, `task-contextualizer`), plus `plan-detailed`, a standalone planner used **by exception** when a change is bounded and single-concern and the full pipeline would be disproportionate.
 - **meta/** — the self-improvement loop: `skill-improvement-planner` (aggregates reflections) and `skill-editor` (applies the planner's output). Run these periodically to let the pipeline's accumulated feedback update its own instructions.
 - **tools/** — shared Python utilities: `frontier_model_discovery.py` (dynamic Gemini/Codex model resolution with 24h cache), `review_with_cli.py` (parallel cross-CLI review), `next_reflection_path.py` (incrementing reflection filename), `scaffold_docs_catalog.py` (initial + rescan of the docs catalog).
 - **efficiency-kit/** — nine short skills that prevent the most common token-wasting anti-patterns: `file-read-cache`, `safe-edit`, `batch-verify`, `smart-search`, `diagnose-bash-error`, `validate-before-bash`, `detect-environment`, `smart-screenshot`, `page-load-monitor`.

@@ -182,6 +182,19 @@ Every artifact-producing pipeline skill (`phase-roadmap-builder`, `plan-phase`, 
 
 **Where the files physically live**: `~/.claude/skills/<skill>/` is a symlink to the skill's source repo (either this clone or wherever `install.sh` points). Reflection and handoff files land in that source repo via the symlink. The repo's `.gitignore` excludes `*/reflections/` and `*/handoff.md` so they don't pollute git history — but they stay visible on disk for review. If repo-specific content ever leaks into a reflection that's supposed to be repo-agnostic, you'll spot it immediately by browsing the skill dir.
 
+### Standalone planner — `plan-detailed` (used by exception, not as part of the pipeline)
+
+`plan-detailed` ships in `planning-chain/` but is **not** part of the `phase-roadmap-builder` → `plan-phase` → `execute-phase` loop. Use it **by exception, outside the pipeline**, when a change is bounded and single-concern and the pipeline's roadmap/phase/lane machinery would be disproportionate.
+
+Rough guidance:
+
+- **Bug fix, small feature, targeted refactor, change with obvious blast radius** → `plan-detailed`.
+- **Multi-concern work that would benefit from parallel execution** → `/phase-roadmap-builder` then `/plan-phase` per phase.
+
+What `plan-detailed` produces: a committed plan doc at `plans/detailed-<slug>-<YYYYMMDD-HHMM>.md` with the same rigor the pipeline planners apply — research via parallel Explore teammates, explicit change enumeration (file + entity + action + reason), documentation impact inline, dependency ordering, concrete verification, testable acceptance criteria. Supports `--review-external` (Gemini + Codex critique) and follows the same close-out pattern (commit + reflection + handoff).
+
+Auto-triggers on phrases like "help me implement X", "write a plan for Y", "walk me through the changes to Z", "I need a plan before I start coding" — no explicit `/plan-detailed` invocation needed, though it still works.
+
 ---
 
 # Part 3 — Meta-skills (maintain the pipeline itself)
