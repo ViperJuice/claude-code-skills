@@ -154,6 +154,8 @@ For each lane, author an ordered task list:
 
 Tasks are identified `<SL-ID>.<N>`.
 
+**Every phase must include a terminal `SL-docs` lane** after the impl/verify lanes. See `## Docs-sweep lane template` below. No opt-out — force a conscious doc decision every phase, even if the lane ends up recording "no cross-cutting changes needed."
+
 ### Step 6 — Emit per-lane tasks via TaskCreate
 
 For each lane, emit one `TaskCreate`:
@@ -245,6 +247,10 @@ SL-2 — <lane name>
 ### SL-2 — <lane name>
 …
 
+### SL-docs — Documentation & spec reconciliation
+
+(See `## Docs-sweep lane template` earlier in this skill for the full lane spec. Copy it verbatim and set `Depends on:` to list every other SL-N in this phase.)
+
 ## Execution Notes
 - <Parallelism caveats, sequencing gotchas, lanes that can't be worktree-isolated (shared migrations, shared generated files), etc.>
 - **Single-writer files**: <files multiple lanes might want to touch but only one is allowed to modify — e.g., barrel index files, generated types, nav config, worker router. List the owner lane for each. If a single-writer file is also touched by a later phase, name this phase's owner lane and have them author-at-plan-time any additions the later phase's consumer lanes will need. Re-opening the file from the later phase's lane adds a cross-phase serialization edge that shouldn't exist.>
@@ -282,6 +288,40 @@ Defaults only — if the spec already uses its own identifiers (e.g., `P1-SL-AUT
 | `test` | Write failing tests that pin down the lane's contracts. | Must precede any `impl` task in the same lane. |
 | `impl` | Write the code that makes the preceding tests pass. | Must depend on exactly one `test` task in the same lane. |
 | `verify` | Run the full lane test suite + any integration checks. | Last task in the lane. Depends on the last `impl` task. |
+| `docs` | Update cross-cutting documentation and the docs catalog. | Lives in the terminal `SL-docs` lane. Depends on every other lane's final `verify` task. |
+
+## Docs-sweep lane template
+
+Every phase plan must include this as the final lane. Copy verbatim into the `## Lanes` section, adjust `Depends on:` to list every other `SL-N` in the phase, and edit the `Scope notes` if the phase has atypical docs impact.
+
+```markdown
+### SL-docs — Documentation & spec reconciliation
+
+- **Scope**: Refresh the docs catalog, update cross-cutting documentation touched or invalidated by this phase's impl lanes, and append any post-execution amendments to phase specs whose interface freezes turned out wrong.
+- **Owned files** (read `.claude/docs-catalog.json` for the authoritative list; a minimum set is below, but the catalog is canonical):
+  - Root: `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `MIGRATION.md`, `ARCHITECTURE.md`, `DESIGN.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
+  - Agent indexes: `llm.txt`, `llms.txt`, `llms-full.txt`
+  - Service manifests: `services.json`, `openapi.yaml`/`.yml`/`.json`
+  - `docs/**`, `rfcs/**`, `adrs/**`
+  - `.claude/docs-catalog.json` (this lane maintains it)
+  - The current phase's section of `specs/phase-plans-v<N>.md` (append-only amendments)
+  - Any prior `plans/phase-plan-v<N>-<alias>.md` or prior spec phase sections whose contracts this phase invalidated (prior-phase amendments allowed)
+- **Interfaces provided**: (none)
+- **Interfaces consumed**: (none)
+- **Parallel-safe**: no (terminal)
+- **Depends on**: every other `SL-N` in this phase
+
+**Tasks**:
+
+| Task ID | Type | Depends on | Files in scope | Action |
+|---|---|---|---|---|
+| SL-docs.1 | docs | — | `.claude/docs-catalog.json` | Rescan: `python3 "$(git rev-parse --show-toplevel)/.claude/skills/_shared/scaffold_docs_catalog.py" --rescan`. Picks up any new doc files created by impl lanes; preserves `touched_by_phases` history. |
+| SL-docs.2 | docs | SL-docs.1 | per catalog | For each file in the catalog, decide: does this phase's work change it? If yes, update the file and append the current phase alias to its `touched_by_phases`. If no, leave it. Record in commit message any files intentionally skipped. |
+| SL-docs.3 | docs | SL-docs.2 | `specs/phase-plans-v<N>.md`, prior plans | Append `### Post-execution amendments` subsections to any phase section (current or prior) whose interface freeze was empirically wrong this run. Named freeze IDs + dated correction. |
+| SL-docs.4 | verify | SL-docs.3 | — | Run any repo doc linters (`markdownlint`, `vale`, `prettier --check`, Mermaid/PlantUML render check). If none configured, no-op. |
+```
+
+No opt-out. A phase with nothing to change still runs `SL-docs` and records that explicitly in its commit message — the audit trail.
 
 ## Consensus mechanism (synthesis rule)
 
@@ -307,6 +347,7 @@ Before writing the plan doc, verify:
 - [ ] **Expected add/add conflicts declared** — if SL-0 preamble stubs a file that a lane replaces, add it under Execution Notes' "Expected add/add conflicts" block.
 - [ ] **SL-0 re-exports use `__getattr__` lazy form** — declared under Execution Notes' "SL-0 re-exports" block.
 - [ ] **Plan doc passes `validate_plan_doc.py`** — run the validator and confirm zero errors before calling `ExitPlanMode`. The validator catches structural issues (missing headings, duplicate lane IDs, malformed task tables) that manual review misses.
+- [ ] **Terminal `SL-docs` lane present** — every phase plan must include the docs-sweep lane from `## Docs-sweep lane template`. `Depends on:` lists every other lane in the phase. No opt-out; a phase with no doc changes still runs the lane and records that.
 
 ## Teamwork & delegation posture
 

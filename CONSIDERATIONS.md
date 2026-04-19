@@ -133,6 +133,16 @@ Cache schema:
 
 Tuning knob: `EXECUTE_MAX_PARALLEL_LANES` controls the max concurrent lane dispatches per wave. Increase it on machines with lots of RAM and GPU headroom; keep it small if you hit rate limits or merge-conflict churn.
 
+### Documentation drift prevention
+
+Every phase plan includes a mandatory terminal `SL-docs` lane that updates cross-cutting docs (root README, CHANGELOG, CONTRIBUTING, CLAUDE.md / AGENTS.md, `llm*.txt`, `services.json` / `openapi.*`, ARCHITECTURE, DESIGN, `docs/**`, `rfcs/**`, `adrs/**`) after all impl lanes land. No opt-out — phases with no doc impact still run the lane and record that in the commit message.
+
+The lane's inputs are driven by `.claude/docs-catalog.json`, a repo-scoped inventory of documentation surfaces. `phase-roadmap-builder` bootstraps the catalog on first run; each phase's `SL-docs` lane rescans at start to pick up any new doc files created by impl lanes (history preserved). The catalog also tracks `touched_by_phases` per file, so you can see which phase last modified a given doc.
+
+`SL-docs` can also append `### Post-execution amendments` subsections to phase specs — both the current phase and prior phases — when interface freezes turn out empirically wrong mid-execution. This keeps the spec/plan history honest without rewriting earlier phase sections.
+
+Committing `.claude/docs-catalog.json` to git is the intended pattern — it's repo state, not ephemeral.
+
 ### Worktree conventions
 
 `execute-phase` isolates each lane's teammate in its own git worktree under `.claude/worktrees/`. The allocator guarantees unique names (`lane-sl-1-<timestamp>-<random>`). After a lane's verify passes, the orchestrator resolves the lane's commit by SHA (never by branch name — the harness sometimes auto-names branches) and merges with `--no-ff`.

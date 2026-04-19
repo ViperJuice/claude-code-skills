@@ -67,6 +67,16 @@ Sources (permissive but bounded):
 
 Do not grep the repo for additional material. If context is insufficient, stop and ask the user via `AskUserQuestion` — a thin roadmap is worse than one more question.
 
+### Step 1a — Ensure docs catalog exists
+
+Run:
+
+```bash
+python3 "$(git rev-parse --show-toplevel)/.claude/skills/_shared/scaffold_docs_catalog.py"
+```
+
+Scaffolds `.claude/docs-catalog.json` if absent; no-op if already present. The catalog drives the `SL-docs` lane that `plan-phase` constructs for every phase. Existence matters more than content at this stage — the catalog will be refreshed (`--rescan`) by each `SL-docs` lane as the roadmap executes.
+
 ### Step 2 — Synthesize top-of-document sections
 
 Fill these sections before touching phase decomposition:

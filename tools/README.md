@@ -48,6 +48,24 @@ Writes a markdown file with sections for each CLI's output plus a note reminding
 
 Required only if you use `--review-external`.
 
+## `scaffold_docs_catalog.py`
+
+Scaffolds `.claude/docs-catalog.json` — the single source of truth for the cross-cutting documentation files in your repo. Used by the docs-sweep lane (`SL-docs`) that every phase plan includes.
+
+Usage:
+
+```bash
+# First-time scaffold (phase-roadmap-builder does this automatically)
+python3 scaffold_docs_catalog.py
+
+# Re-scan and merge new doc files created by impl lanes (SL-docs does this)
+python3 scaffold_docs_catalog.py --rescan
+```
+
+Inventories common doc locations: root-level standards (`README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`, `SECURITY.md`, etc.), agent-facing indexes (`llm.txt`, `llms.txt`, `llms-full.txt`), service manifests (`services.json`, `openapi.*`), and `docs/**`, `rfcs/**`, `adrs/**`. Preserves `touched_by_phases` history when rescanning so the catalog accumulates per-file phase provenance over time.
+
+Committed to git — the catalog is repo state, not ephemeral.
+
 ## `next_reflection_path.py`
 
 Emits the next reflection log path for a given skill. Used by the close-out step in artifact-producing skills to name their repo-agnostic reflections.
