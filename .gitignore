@@ -17,3 +17,9 @@ planning-chain/*/reflections/
 planning-chain/*/handoff.md
 efficiency-kit/*/reflections/
 efficiency-kit/*/handoff.md
+meta/*/reflections/
+meta/*/handoff.md
+
+# Generated plan output (skill-improvement-planner)
+meta/*/plans/
+meta/*/applied-plans.log

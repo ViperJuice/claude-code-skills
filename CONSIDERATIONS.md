@@ -1,10 +1,11 @@
 # Considerations, prerequisites, and nuances
 
-This document has three parts:
+This document has four parts:
 
 1. **Global** — prerequisites that apply to everything (target harness, custom tool dependencies, writing style).
 2. **The pipeline** — the AI-driven-engineering loop (`phase-roadmap-builder` → `plan-phase` → `execute-phase`, with `task-contextualizer` as a supporting checklist) and every consideration specific to running it.
-3. **Standalone skills** — the efficiency-kit. Unrelated to the pipeline. Short passive rules that load into context and steer the agent away from common anti-patterns.
+3. **Meta-skills** — the self-improvement loop (`skill-improvement-planner` → `skill-editor`) that reviews accumulated reflections and updates the pipeline skills' instructions over time.
+4. **Standalone skills** — the efficiency-kit. Unrelated to the pipeline. Short passive rules that load into context and steer the agent away from common anti-patterns.
 
 ---
 
@@ -183,7 +184,49 @@ Every artifact-producing pipeline skill (`phase-roadmap-builder`, `plan-phase`, 
 
 ---
 
-# Part 3 — Standalone skills (efficiency-kit)
+# Part 3 — Meta-skills (maintain the pipeline itself)
+
+Two skills that close the self-improvement loop on the planning chain. Use them periodically (monthly, or after a batch of phase executions has accumulated reflections).
+
+```
+pipeline runs produce reflections
+        │
+        ▼
+/skill-improvement-planner   →   plan-v<N>-<ISO>.md (aggregated, repo-agnostic)
+        │
+        ▼ (/clear, optional user review of the plan)
+/skill-editor                →   applies recommendations; archives consumed reflections
+        │
+        └──► next pipeline run benefits from the improved instructions
+```
+
+## The meta-skills
+
+- **skill-improvement-planner** — Aggregates reflection files from `phase-roadmap-builder`, `plan-phase`, and `execute-phase`. Identifies recurring themes (default threshold: 2 distinct reflections), separates high-confidence from speculative, flags contradictions, enforces repo-agnostic output. Produces a plan file at `~/.claude/skills/skill-improvement-planner/plans/plan-v<N>-<ISO>.md` with a frontmatter listing every reflection consumed. Does not edit any skill itself.
+
+- **skill-editor** — Ingests the plan file (either explicitly via argument or via the planner's handoff). For each recommendation, spawns a frontier-tier Agent to apply the change while preserving directive-only house style. Mirrors edits to both `~/code/dotfiles/` and this repo when a skill is dual-homed. Archives consumed reflections to `<reflections-dir>/archive/` — per-recommendation granularity means a reflection stays unarchived if any recommendation it supports failed, so next cycle can reconsider. Commits + pushes both repos.
+
+## Meta-skill considerations
+
+### The reflection archive convention
+
+New with this loop. Path: `~/.claude/skills/<skill>/reflections/archive/<original-filename>`. Created lazily by `skill-editor` on first archive. The planner excludes `archive/` when globbing, so each aggregation cycle sees only un-processed reflections.
+
+### Invocation cadence
+
+There's no automatic trigger. Run `/skill-improvement-planner` when reflections have accumulated — typically several pipeline runs' worth. Review the generated plan (it's a markdown file; skim it), then run `/skill-editor` to apply. The `/clear` between them is strongly recommended so the editor starts with only the plan in context, not the planner's transcript.
+
+### Failure handling
+
+If a recommendation can't be applied (vague, repo-specific, target file missing, or contradicts existing instructions), `skill-editor` refuses cleanly, reports the reason, and leaves the supporting reflections unarchived. The next `/skill-improvement-planner` run will reconsider them — possibly in a clearer form once more reflections accumulate.
+
+### Double-application protection
+
+`skill-editor` appends each applied plan's timestamp to `~/.claude/skills/skill-editor/applied-plans.log`. On re-run, it checks this log and prompts if the plan has already been applied once — applying twice is almost always a mistake.
+
+---
+
+# Part 4 — Standalone skills (efficiency-kit)
 
 These are unrelated to the pipeline. Each is a short passive rule that loads into context and steers you away from a common anti-pattern. They don't run workflows, don't produce artifacts, don't need reflections or handoffs. Load whichever are relevant to the work you're doing.
 

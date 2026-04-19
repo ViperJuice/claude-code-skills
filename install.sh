@@ -55,6 +55,12 @@ for d in "$REPO_ROOT"/efficiency-kit/*/; do
     install_entry "${d%/}" "$SKILLS_DIR/$(basename "$d")"
 done
 
+# Meta-skills (skill-improvement-planner + skill-editor)
+for d in "$REPO_ROOT"/meta/*/; do
+    [[ -d "$d" ]] || continue
+    install_entry "${d%/}" "$SKILLS_DIR/$(basename "$d")"
+done
+
 # Shared tools — land at .claude/skills/_shared/ to match the paths in SKILL.md
 mkdir -p "$SKILLS_DIR/_shared"
 for f in "$REPO_ROOT"/tools/*.py; do

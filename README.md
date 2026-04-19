@@ -39,8 +39,9 @@ Then in any Claude Code session:
 ## What's in the box
 
 - **planning-chain/** — the four flagship skills: `phase-roadmap-builder`, `plan-phase`, `execute-phase`, `task-contextualizer`.
-- **tools/** — shared Python utilities used by the planning skills: `frontier_model_discovery.py` (dynamic Gemini/Codex model resolution with 24h cache), `review_with_cli.py` (parallel cross-CLI review), `next_reflection_path.py` (incrementing reflection-log filename).
-- **efficiency-kit/** — seven short skills that prevent the most common token-wasting anti-patterns: `file-read-cache`, `safe-edit`, `batch-verify`, `smart-search`, `diagnose-bash-error`, `validate-before-bash`, `detect-environment`.
+- **meta/** — the self-improvement loop: `skill-improvement-planner` (aggregates reflections) and `skill-editor` (applies the planner's output). Run these periodically to let the pipeline's accumulated feedback update its own instructions.
+- **tools/** — shared Python utilities: `frontier_model_discovery.py` (dynamic Gemini/Codex model resolution with 24h cache), `review_with_cli.py` (parallel cross-CLI review), `next_reflection_path.py` (incrementing reflection filename), `scaffold_docs_catalog.py` (initial + rescan of the docs catalog).
+- **efficiency-kit/** — nine short skills that prevent the most common token-wasting anti-patterns: `file-read-cache`, `safe-edit`, `batch-verify`, `smart-search`, `diagnose-bash-error`, `validate-before-bash`, `detect-environment`, `smart-screenshot`, `page-load-monitor`.
 - **_template/** — the house style for writing your own skills: imperative, directive-only, no war stories.
 
 ## Prerequisites, custom tools, and nuances
@@ -58,7 +59,9 @@ The skills follow five rules worth calling out so forks preserve them:
 1. **Directive-only instructions.** No war stories, no stats, no narrative justification. Rules in imperative form. Reasons stated in one clause, not paragraphs. The `_template/` directory codifies this.
 2. **Maximum parallelism.** Phases are serial checkpoints; lanes within a phase are parallel. The roadmap decomposition rules push for fewer phases with more lanes and the tightest possible early interface freezes.
 3. **Clean-tree close-out.** Every artifact-producing skill commits its output before exiting, so the next skill in the chain starts with a clean tree.
-4. **Reflection + handoff close-out.** Each artifact-producing skill writes two files at close-out: a repo-agnostic reflection (`~/.claude/skills/<skill>/reflections/<skill>-reflection-v<N>.md`, versioned, fuel for a future meta-skill) and a repo-specific handoff (`~/.claude/skills/<skill>/handoff.md`, overwritten each run, read by the next skill in the chain). The `/clear`-then-next-skill pattern lets each new agent start with a fresh context window while still picking up exactly where the previous one left off.
+4. **Reflection + handoff close-out.** Each artifact-producing skill writes two files at close-out: a repo-agnostic reflection (`~/.claude/skills/<skill>/reflections/<skill>-reflection-v<N>.md`, versioned) and a repo-specific handoff (`~/.claude/skills/<skill>/handoff.md`, overwritten each run, read by the next skill in the chain). The `/clear`-then-next-skill pattern lets each new agent start with a fresh context window while still picking up exactly where the previous one left off.
+
+5. **Self-improvement loop.** The reflections are fuel for `skill-improvement-planner` + `skill-editor` (see `meta/`). Periodically, the planner aggregates reflections across pipeline runs and writes a plan; the editor applies the plan and archives the reflections it consumed. The pipeline's instructions improve over time without hand-editing.
 5. **External review over multi-harness consensus.** Claude authors the plan. Gemini and Codex critique it in parallel. Agreements get attention; divergences are context for the human.
 
 ## Contributing
