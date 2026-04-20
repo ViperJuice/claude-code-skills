@@ -1,11 +1,11 @@
 ---
 name: skill-improvement-planner
-description: "Aggregate reflection files from the planning-chain skills (phase-roadmap-builder, plan-phase, execute-phase) and produce an improvement plan that a downstream skill-editor will ingest. Use when the user wants to review accumulated skill feedback, aggregate reflections, plan skill improvements, or asks 'what changes should I make to my skills' — phrases like 'review my reflections', 'aggregate skill feedback', 'plan improvements to the pipeline skills', 'let's see what the reflections say', or after several phase executions have run and the reflections have accumulated. Does NOT edit skills itself — produces a plan for a separate skill-editor skill to apply."
+description: "Aggregate reflection files from the planning-chain skills (phase-roadmap-builder, plan-phase, execute-phase) plus the meta-skills that operate on them (skill-improvement-planner, skill-editor) and produce an improvement plan that a downstream skill-editor will ingest. Use when the user wants to review accumulated skill feedback, aggregate reflections, plan skill improvements, or asks 'what changes should I make to my skills' — phrases like 'review my reflections', 'aggregate skill feedback', 'plan improvements to the pipeline skills', 'let's see what the reflections say', or after several phase executions have run and the reflections have accumulated. Does NOT edit skills itself — produces a plan for a separate skill-editor skill to apply."
 ---
 
 # skill-improvement-planner
 
-Reads reflection files produced by the planning-chain skills' close-out steps, aggregates recurring themes across runs, and writes an improvement plan. Does not edit skills. A separate `skill-editor` skill ingests the plan and performs the edits.
+Reads reflection files produced by the planning-chain skills' close-out steps — plus reflections emitted by the meta-skills (`skill-improvement-planner`, `skill-editor`) themselves — aggregates recurring themes across runs, and writes an improvement plan. Does not edit skills. A separate `skill-editor` skill ingests the plan and performs the edits. Including the meta-skills' own reflections closes the self-improvement loop so this planner and the editor can be iterated on with the same pipeline they drive.
 
 ## When to use
 
@@ -22,7 +22,7 @@ Reads reflection files produced by the planning-chain skills' close-out steps, a
 
 | Arg | Required | Meaning |
 |---|---|---|
-| `--target <skill-name>` | no | Plan only for one skill; skip the rest. Default: all three pipeline skills. |
+| `--target <skill-name>` | no | Plan only for one skill; skip the rest. Default: all five skills (the three pipeline skills plus the two meta-skills). |
 | `--min-reflections <N>` | no | Default 2. Skip skills with fewer new (un-archived) reflections to avoid acting on noise. |
 | `--output <path>` | no | Override the generated plan path. |
 
@@ -35,6 +35,10 @@ Glob these paths, excluding any `archive/` subdirectory:
 - `~/.claude/skills/phase-roadmap-builder/reflections/*.md`
 - `~/.claude/skills/plan-phase/reflections/*.md`
 - `~/.claude/skills/execute-phase/reflections/*.md`
+- `~/.claude/skills/skill-improvement-planner/reflections/*.md`
+- `~/.claude/skills/skill-editor/reflections/*.md`
+
+The last two close the self-improvement loop: this planner and the editor write reflections on their own runs, and those reflections must be aggregated here or the meta-skills can never be improved by their own pipeline. A missing `reflections/` directory for either meta-skill is not an error — they materialize lazily on first close-out.
 
 If `--target <skill>` is set, limit to that one skill.
 

@@ -1,6 +1,6 @@
 # Aggregator prompt
 
-You are an aggregator. You will receive a set of **reflection files** produced at close-out by three planning-chain skills: `phase-roadmap-builder`, `plan-phase`, and `execute-phase`. Each reflection is a short markdown document with two sections: `## What worked` and `## Improvements to SKILL.md`. Your job is to read them, find what matters, and produce a concrete plan that a downstream skill-editor can apply.
+You are an aggregator. You will receive a set of **reflection files** produced at close-out by the planning-chain skills (`phase-roadmap-builder`, `plan-phase`, `execute-phase`) and the meta-skills that operate on them (`skill-improvement-planner`, `skill-editor`). Each reflection is a short markdown document with two sections: `## What worked` and `## Improvements to SKILL.md`. Your job is to read them, find what matters, and produce a concrete plan that a downstream skill-editor can apply. The meta-skills' reflections are in-scope so the planner and editor can be improved by the same loop they drive.
 
 ## Inputs
 
