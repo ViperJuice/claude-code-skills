@@ -49,7 +49,14 @@ Plan-location variables are inherited from `plan-phase` so the two skills resolv
 | `PLAN_DOC` | `plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` | Override the resolved plan-doc path directly. |
 | `EXECUTE_MERGE_TARGET` | Current branch at invocation | Branch lanes merge into. |
 | `EXECUTE_WORKTREE_ROOT` | `.worktrees/` (inside repo; auto-gitignored) | Root dir for per-lane worktrees. |
-| `EXECUTE_MAX_PARALLEL_LANES` | `2` | Max concurrent lane dispatches per wave. Keep small: each merge makes the other running lanes' bases stale. |
+| `EXECUTE_MAX_PARALLEL_LANES` | `4` | Max concurrent lane dispatches per wave; parallelism-maximizing default. Lower to `2` when stale-base churn becomes problematic on phases with many interdependent lanes. |
+
+## Expected helpers
+
+Helpers under `~/.claude/skills/_shared/` may be absent on some hosts. Each helper degrades as listed:
+
+- `_shared/next_reflection_path.py` — falls back to an inline date-based filename (see Step 9.5).
+- `_shared/review_with_cli.py` — used only with `--review-external`; no fallback (required for that flag).
 
 ## Deferred tool preloading
 
@@ -65,7 +72,7 @@ The main thread reads exactly two things: the plan doc and the TaskList. It does
 
 ### Step 0 — Read predecessor handoff (if present)
 
-Check `~/.claude/skills/plan-phase/handoff.md`. If it exists, `Read` it in full — `plan-phase` just produced the lane plan and may have flagged gotchas the dispatch loop needs to know about. Validate: `from:` must be `plan-phase`; timestamp <7 days. On mismatch or staleness, flag via `AskUserQuestion` with `[use anyway, ignore, abort]`.
+Check `~/.claude/skills/plan-phase/handoff.md`. If it exists, `Read` it in full — `plan-phase` just produced the lane plan and may have flagged gotchas the dispatch loop needs to know about. Validate: `from:` must be `plan-phase`; timestamp <7 days; every `artifact:` path must resolve under the current repo's `$(git rev-parse --show-toplevel)`. On mismatch, staleness, or artifact paths pointing outside the current repo root (cross-project contamination of the global handoff file), flag via `AskUserQuestion` with `[use anyway, ignore, abort]`.
 
 Fold the handoff's "Open items" and "Repo-specific gotchas" into each lane teammate's brief (Step 5's Teammate brief contents) so they carry the same context without the user having to reinject it.
 
@@ -91,6 +98,12 @@ Build the lane graph. Topologically sort it; reject on cycle with a clear error.
 - Record merge target = current branch (or `$EXECUTE_MERGE_TARGET`).
 - Sanity check: every symbol appearing in any lane's `Interfaces consumed` must either be produced by an upstream lane's `Interfaces provided` OR be pre-existing (skip unknown symbols with a warning, don't hard-fail).
 - If `--dry-run`: print the topological schedule with per-lane model/thinking assignments (see Step 3) and stop here.
+
+### Step 2.5 — Baseline-capture
+
+Run the plan's full regression command once at phase start against the pre-phase tip. Cache the failing-test list to `.claude/execute-phase-state.json#baseline_fails`. Step 9 diffs against this cached list rather than reconstructing it.
+
+Before hypothesizing test pollution on a post-merge failure, run the failing test in isolation (fresh process) to distinguish a direct regression from fixture pollution.
 
 ### Step 2a — Worktree hygiene preflight
 
@@ -136,9 +149,11 @@ Resolve tier → model from the Model tiers table at the top of this skill and p
 
 ### Step 4 — TeamCreate
 
+**Preflight (before any `Agent` or `TeamCreate` call).** Flush inherited team context from a predecessor skill run via `TeamList` (or a defensive `TeamDelete`). On the error signature `"already leading team X"`, `TeamDelete` the stale team and retry with a repo-scoped suffix — e.g., the short hash of `$(git rev-parse --show-toplevel)` — to prevent cross-project team-name collisions. Same-aliased phases from different repos collide on the global team namespace without a suffix. Error signature `"Team X does not exist"` on `TeamDelete` is a no-op; proceed.
+
 Create one team for the phase:
 
-- **Team name**: `phase-<PHASE_ALIAS>` (e.g., `phase-p1`).
+- **Team name**: `phase-<PHASE_ALIAS>` (e.g., `phase-p1`), with repo-scoped suffix appended when collision is detected.
 - **Teammates**: one per lane, `subagent_type: "general-purpose"`. Teammate names use the allocator — see Step 5.
 
 TeamCreate registration enables `SendMessage` retry rounds without fresh Agent spawns.
@@ -149,7 +164,7 @@ State per lane: `pending | running | verify-ok | merged | failed`. State per gat
 
 Repeat until all lanes are `merged` or halt is triggered:
 
-1. **Find ready lanes** — `pending` lanes whose upstream lanes are all `merged` AND all consumed `IF-0-*` gates are `closed`. Cap the dispatch batch at `EXECUTE_MAX_PARALLEL_LANES` (default 2). Slice the eligible set to the first N (lower SL-ID first) and queue the rest.
+1. **Find ready lanes** — `pending` lanes whose upstream lanes are all `merged` AND all consumed `IF-0-*` gates are `closed`. Cap the dispatch batch at `EXECUTE_MAX_PARALLEL_LANES` (default 4). Slice the eligible set to the first N (lower SL-ID first) and queue the rest.
 
 2. **Allocate worktree names**. For each ready lane, run `scripts/allocate_worktree_name.sh <sl-id>`. Substitute the emitted name (e.g., `lane-sl-1-20260418T144536-nxz5`) into both `Agent(name=…)` and the briefed `EnterWorktree(name=…)`. Bare `lane-<sl-id>` names collide under rapid dispatch.
 
@@ -162,17 +177,26 @@ Repeat until all lanes are `merged` or halt is triggered:
    - **Related files** the lane reads but does not own: type defs, test fixtures, shared config. Distinct from `Owned files`.
    - Concrete upstream artifact paths (populated from now-merged upstream lanes) for every entry in `Interfaces consumed`.
    - The merge target branch and the orchestrator's current tip SHA, injected as `<TIP_SHA>` (used by the stale-base check below).
-   - The lane's test → impl → verify task list.
+   - The lane's test → impl → verify task list. The lane's verify command must include regression files listed in the plan's `## Verification` section that reference this lane's owned files, not only the lane's new tests. Each lane must enumerate tests that mock or stub any existing public function the lane's scope adds a call to, and include those tests in verify.
    - Thinking-level guidance matching the lane's profile.
    - **Stale-base discipline**: AFTER `EnterWorktree` returns and BEFORE any code change, run `git rebase main` (or `git merge main --no-ff -m "merge: incorporate prior-lane foundation"`). Verify with `git merge-base --is-ancestor <TIP_SHA> HEAD && echo OK || echo STALE`. Repeat the rebase immediately before your final commit. On conflicts, STOP and report — do not resolve silently. Never `git reset --hard` or `git checkout HEAD~N -- …` in a stale worktree; this destroys peer-lane work on `--no-ff` merge.
-   - **Structured-reply instruction**: "When done, reply with JSON `{lane, verify_exit_code, failed_tasks, notes, commit_sha, branch, worktree_path}`. All seven fields are mandatory. `branch` and `worktree_path` come from `EnterWorktree`'s return value."
+   - **Staging discipline**: Forbid `git add -A` and `git add .`. Stage with explicit pathspecs drawn from the lane's `Owned files`.
+   - **No self-merge**: DO NOT run `git merge` or `git push` against the merge-target branch yourself; the orchestrator owns merges.
+   - **Structured-reply instruction**: "When done, reply with JSON `{lane, verify_exit_code, failed_tasks, pre_existing_failures, tsc_error_delta, notes, commit_sha, branch, worktree_path}`. `failed_tasks` lists failures attributable to this lane; `pre_existing_failures` lists failures reproducible on the base SHA (capture the base-SHA reproduction command as evidence). When the lane's verify chain runs whole-repo type-checking, populate `tsc_error_delta` (errors-after minus errors-before); accept `tsc_error_delta <= 0` as a pass even if raw exit code is non-zero. `branch` and `worktree_path` come from `EnterWorktree`'s return value."
 
    Apply the `/task-contextualizer` checklist to every brief.
 
 5. **Await completions**. For each:
    - `verify_exit_code == 0` → run gate verification (Step 6). On green → auto-merge (Step 7). Mark lane `merged`, flip produced gates to `closed`, update the lane's `TaskCreate`'d task to `completed`.
    - Non-zero or gate failure → retry-once (Step 8).
-   - **Idle without JSON reply** → `SendMessage` to the teammate by name asking for the envelope. If it still doesn't reply and a commit exists on a branch you can identify via `git branch` or `git log --all --oneline --author=<user>`, treat the commit as the result and proceed with Step 7's destructiveness check. Never block the phase on missing JSON when the artifact is on disk.
+   - **Idle without JSON reply** → handle per the decision table below. After one `SendMessage` retry with no response in a reasonable interval, escalate directly to SHA-discovery rather than continuing to ping.
+
+     | Case | Condition | Action |
+     |---|---|---|
+     | (a) | Idle + no commits | `SendMessage` one nudge requesting commit + envelope. |
+     | (b) | Idle + commit on identifiable lane branch | Treat the commit as the result; run Step 6.5 / Step 7 audits; proceed on `CLEAN`. |
+     | (c) | Idle + multiple candidate commits | One more `SendMessage`; if no response, halt for user. |
+     | (d) | Idle + commits landed on merge-target directly | Route to `PARENT_ON_MERGE_TARGET` verdict (Step 6.5). |
 
 6. Persist lane + gate state to `.claude/execute-phase-state.json` after every transition (enables `--resume`).
 
@@ -210,6 +234,10 @@ Verdicts (emitted on stdout; details on stderr):
   1. Merge by SHA per Step 7.
   2. Run `git checkout <merge-target>` in the parent BEFORE Step 7's worktree cleanup — otherwise `git worktree remove` refuses.
   3. Record parent-fallback note in state.
+- **`PARENT_ON_MERGE_TARGET`** (alias `LANE_BYPASSED_ISOLATION`) — resolve the reply envelope's `commit_sha`; if `git merge-base --is-ancestor <sha> <merge-target>` is already true before any merge step, the commit landed directly on the target via an `EnterWorktree` fallback:
+  1. Skip the merge (already merged).
+  2. Clean up the worktree and branch per Step 7's post-merge cleanup.
+  3. Record the fallback in `.claude/execute-phase-state.json` and note it in the close-out.
 
 ### Step 7 — Auto-merge
 
@@ -220,6 +248,8 @@ Verdicts (emitted on stdout; details on stderr):
 ```bash
 python scripts/audit_lane_file_touches.py <lane-sha> <plan-doc-path> <this-lane-id>
 ```
+
+**Parser contract.** After matching the `**Owned files**:` heading, the parser walks subsequent deeper-indented bullets until the next sibling bullet or blank line and accumulates backticked tokens. Both inline form (`- **Owned files**: \`path/one\`, \`path/two\``) and nested-bullet form (heading followed by `  - \`path/one\``) are supported. A unit test covering both formats ships alongside the script.
 
 Verdicts:
 
@@ -234,6 +264,8 @@ bash scripts/pre_merge_destructiveness_check.sh <lane-sha> <merge-target> <white
 ```
 
 Where `<whitelist-path>` is a file (one path per line) of deletions the lane legitimately performs per its plan section; `/dev/null` if the lane is purely additive.
+
+The script (or a sibling) also runs an ADDITION-side check mirroring the deletion check: flag commits that ADD more than N files (default ~50) or more than M lines outside the lane's owned globs. Out-of-scope adds surface as a verdict alongside deletions to catch lanes that wandered.
 
 Verdicts:
 
@@ -271,7 +303,7 @@ fi
 
 On non-zero exit, the merge broke package load. Unwind with `git reset --hard HEAD~`, then retry per Step 8. Second failure halts the phase.
 
-**Post-merge cleanup.** `git worktree remove --force` any worktrees the lane used. `git branch -D` (not `-d`) every lane branch — salvaged work leaves branches unreachable from the merge target. If Step 6.5 returned `PARENT_ON_WRONG_BRANCH`, `git checkout <merge-target>` in the parent BEFORE removing worktrees.
+**Post-merge cleanup.** First, `cd "$(git rev-parse --show-toplevel)"` so subsequent Bash calls survive. Then `git worktree remove --force` any worktrees the lane used. `git branch -D` (not `-d`) every lane branch — salvaged work leaves branches unreachable from the merge target. If Step 6.5 returned `PARENT_ON_WRONG_BRANCH`, `git checkout <merge-target>` in the parent BEFORE removing worktrees.
 
 ### Step 8 — Retry-once, then halt
 
@@ -309,78 +341,77 @@ After all lanes merged:
 
 ### Step 9.5 — Close-out: Reflection + Handoff
 
-After final summary, resolve paths:
+Commit any merge artifacts BEFORE close-out so the deliverable persists even if close-out is interrupted.
+
+Resolve paths, with an inline fallback for the reflection helper:
 
 ```bash
-REFLECTION_PATH=$(python3 ~/.claude/skills/_shared/next_reflection_path.py execute-phase)
+if [[ -f ~/.claude/skills/_shared/next_reflection_path.py ]]; then
+  REFLECTION_PATH=$(python3 ~/.claude/skills/_shared/next_reflection_path.py execute-phase)
+else
+  REFLECTION_PATH=~/.claude/skills/execute-phase/reflections/$(date -u +%Y-%m-%dT%H-%M-%SZ).md
+fi
 HANDOFF_PATH=~/.claude/skills/execute-phase/handoff.md
 SKILL_MD=~/.claude/skills/execute-phase/SKILL.md
 ```
 
-Spawn ONE close-out agent using the `frontier` tier. It writes BOTH files directly via the Write tool:
+**Primary path — orchestrator writes inline.** The orchestrator writes BOTH files directly via the Write tool using the schemas below. This is the default.
+
+**Optional alternative.** The orchestrator MAY instead spawn a frontier-tier agent for fresh-context independent review. Use this only when independent review is desired.
+
+FILE 1 — REPO-AGNOSTIC reflection → write to `<REFLECTION_PATH>`
 
 ```
-Agent(
-  subagent_type: "general-purpose",
-  model: "<frontier-model-id>",
-  name: "execute-phase-closeout",
-  prompt: """
-    Review the skill at <SKILL_MD> and the current execution transcript.
-    Produce TWO files via the Write tool.
+# execute-phase reflection — <ISO timestamp>
 
-    FILE 1 — REPO-AGNOSTIC reflection → write to <REFLECTION_PATH>
+## What worked
+- <bullet, about the SKILL's instructions>
 
-      # execute-phase reflection — <ISO timestamp>
-
-      ## What worked
-      - <bullet, about the SKILL's instructions>
-
-      ## Improvements to SKILL.md
-      - <specific, actionable change to the instructions>
-
-      Do NOT reference this project, codebase, filenames, or domain.
-
-    FILE 2 — REPO-SPECIFIC handoff → write to <HANDOFF_PATH> (overwrites
-    any prior handoff from this skill)
-
-      ---
-      from: execute-phase
-      timestamp: <ISO>
-      artifact: <phase alias that was executed, merge-commit SHAs>
-      ---
-
-      # Handoff for the next skill
-
-      The next skill in the chain is usually `/plan-phase` for the
-      subsequent phase, or `/phase-roadmap-builder` if the user is
-      appending new phases to the roadmap.
-
-      ## Summary
-      <2-3 sentences: which phase completed, how many lanes merged,
-      final verification state.>
-
-      ## Key decisions made this run
-      - <numbered, one line each — salvaged commits, retry outcomes,
-        which lanes needed escalated models>
-
-      ## Open items for the next skill
-      - <concrete — e.g., "Phase P2A is next; its Interfaces consumed
-        list references IF-0-P1-1 which was frozen with signature X">
-
-      ## Repo-specific gotchas surfaced
-      - <surprises this run: slow tests, flaky browser checks,
-        unexpected module coupling, quirks worth knowing>
-
-      ## Files committed this run
-      - <merge-commit SHAs, with lane ID and brief description>
-
-      ## Next skill's likely scope
-      - <forecast of what plan-phase / phase-roadmap-builder will touch next>
-  """
-)
+## Improvements to SKILL.md
+- <specific, actionable change to the instructions>
 ```
 
-After the agent returns, print to the user:
+Do NOT reference this project, codebase, filenames, or domain.
+
+FILE 2 — REPO-SPECIFIC handoff → write to `<HANDOFF_PATH>` (overwrites any prior handoff from this skill)
+
+```
+---
+from: execute-phase
+timestamp: <ISO>
+artifact: <phase alias that was executed, merge-commit SHAs>
+---
+
+# Handoff for the next skill
+
+The next skill in the chain is usually `/plan-phase` for the
+subsequent phase, or `/phase-roadmap-builder` if the user is
+appending new phases to the roadmap.
+
+## Summary
+<2-3 sentences: which phase completed, how many lanes merged,
+final verification state.>
+
+## Key decisions made this run
+- <numbered, one line each — salvaged commits, retry outcomes,
+  which lanes needed escalated models>
+
+## Open items for the next skill
+- <concrete — e.g., "Phase P2A is next; its Interfaces consumed
+  list references IF-0-P1-1 which was frozen with signature X">
+
+## Repo-specific gotchas surfaced
+- <surprises this run: slow tests, flaky browser checks,
+  unexpected module coupling, quirks worth knowing>
+
+## Files committed this run
+- <merge-commit SHAs, with lane ID and brief description>
+
+## Next skill's likely scope
+- <forecast of what plan-phase / phase-roadmap-builder will touch next>
+```
+
+After both files are written, print to the user:
 
 > Phase `<alias>` complete. `<N>` lanes merged; final verification `<pass|fail>`.
 > Reflection saved to `<REFLECTION_PATH>`.
@@ -459,6 +490,7 @@ Both paths are auto-added to `.gitignore` in Step 2.
 - **Never `--no-ff` merge without the destructiveness check.**
 - **Never resume a STOPped teammate with no commits.** Kill + respawn.
 - **Never override the dirty-tree preflight.** `verify_harness.sh` is the gate. Only paths forward: (a) commit as `chore:`, (b) `git stash push -u` and restore post-phase, (c) abort.
+- **Never rely on implicit shell CWD.** Every orchestrator git/script invocation MUST either wrap as `bash -c 'cd "$(git rev-parse --show-toplevel)" && <cmd>'` or pass `git -C <repo-root>`. `git worktree remove` on the shell's current CWD bricks subsequent Bash calls.
 
 ## Browser verification capabilities
 

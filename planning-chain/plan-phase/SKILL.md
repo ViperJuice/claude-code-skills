@@ -54,6 +54,14 @@ Invocation examples:
 /plan-phase specs/roadmap.md "Phase 3: Billing" --consensus --review-external
 ```
 
+## Expected helpers
+
+The skill references these `_shared/` helpers. Each degrades gracefully if absent:
+
+- `_shared/next_reflection_path.py` — resolves next reflection filename. If absent, fall back to `~/.claude/skills/plan-phase/reflections/reflection-$(date -u +%Y-%m-%dT%H-%M-%SZ).md`.
+- `_shared/review_with_cli.py` — required only for `--review-external`. No fallback; if absent, surface an `AskUserQuestion` with `[skip review this run, abort]`.
+- `_shared/scaffold_docs_catalog.py` — used by `SL-docs.1`. If absent, the docs lane records "docs-catalog rescan helper unavailable; manual catalog audit" in its commit message and proceeds.
+
 ## Deferred tool preloading
 
 Load tools used later in a single query so mid-workflow calls don't pay a round-trip:
@@ -75,7 +83,7 @@ The predecessor skill may be either:
 
 Check both paths. If both exist, pick the one with the newer `timestamp:` in its metadata header. If only one exists, use it. If neither, proceed standalone.
 
-Validate the handoff: `from:` must match the expected predecessor; timestamp should be recent (<7 days). On mismatch or staleness, flag via `AskUserQuestion` with `[use anyway, ignore, abort]`.
+Validate the handoff: `from:` must match the expected predecessor; timestamp should be recent (<7 days). Any `artifact:` path in the handoff must resolve under `$(git rev-parse --show-toplevel)`; otherwise the handoff was written against a different repo (cross-project contamination of the global handoff file). On mismatch, staleness, or cross-project `artifact:` path, flag via `AskUserQuestion` with `[use anyway, ignore, abort]`.
 
 Fold the handoff's "Open items" and "Repo-specific gotchas" into the brief given to Step 2's Explore teammates so they know what to watch for.
 
@@ -100,6 +108,8 @@ Fold the handoff's "Open items" and "Repo-specific gotchas" into the brief given
 
 ### Step 2 — Parallel reconnaissance via Explore teammates
 
+Preflight: call `TeamDelete` defensively to flush any inherited team context from a predecessor skill run, then `TeamCreate` a fresh team named for this run before dispatching any `Agent` calls. Recognize these error signatures as benign on the `TeamDelete`: `Team X does not exist` or `already leading team X`.
+
 Launch up to 3 `Agent(subagent_type: "Explore")` calls in a single message. One per major area the phase touches. Each Agent call MUST set `name:` so it can be re-addressed later via `SendMessage`.
 
 Teammate-naming template: `explore-<area>` (e.g., `explore-schema`, `explore-workers`).
@@ -110,11 +120,17 @@ Each brief must include:
 - A scoped question: "Map existing code in `<paths>` relevant to this phase. Surface: (a) existing utilities/patterns to reuse, (b) current type/schema/interface shapes that constrain the design, (c) places that will need to change, (d) hidden coupling that would break worktree isolation."
 - A 1–2 sentence architecture context: how these paths fit the larger system.
 - Related files the teammate should know about but not rewrite (type defs, tests, shared config).
-- A length cap: "Report in under 400 words."
+- A preload instruction: "Load `SendMessage` via `ToolSearch(query: \"select:SendMessage\")` as your first action so you can reply without a round-trip."
+- An explicit deliverable statement: "Your deliverable is a `SendMessage` to team-lead with your findings; do not rely on text output or idle without reporting."
+- A length guideline: "Be as short as possible while citing every load-bearing file:line. No fixed word cap."
 
 Apply the `/task-contextualizer` checklist to every brief.
 
 Block until all return. Their findings populate `## Context`.
+
+### Step 2.5 — Explore teammate recovery
+
+If a teammate idles without a substantive reply, send one targeted `SendMessage` nudge naming the missing deliverable. On a second non-response, proceed with main-thread read-only reconnaissance rather than respawning the teammate.
 
 ### Step 3 — Architectural decisions
 
@@ -131,6 +147,26 @@ Each teammate's brief includes: the spec phase section, all Explore teammate fin
 Synthesize per the Consensus mechanism below. If round 1 doesn't converge, re-address the same named teammates via `SendMessage` (not new `Agent` calls) with the specific disagreement surfaced. Max 2 rounds.
 
 **Without `--consensus`**: Launch 1 `Agent(subagent_type: "Plan", name: "arch-baseline")` for baseline architecture decisions.
+
+## Preamble lane archetype
+
+The "preamble lane" concentrates single-writer files AND freezes interface shapes on Day 1, letting all downstream lanes run in parallel without contending for the same index/config/init file.
+
+**When to use**: ≥2 parallel lanes would otherwise need to touch the same index/config/init file, OR ≥2 lanes consume the same frozen type.
+
+Template sketch:
+
+```markdown
+### SL-0 — Preamble (interface + single-writer setup)
+- **Scope**: Freeze shared types and stub the single-writer files every downstream lane will import from.
+- **Owned files**: `src/index.ts`, `src/config.ts`, `src/__init__.py` (list every shared index/config/init file)
+- **Interfaces provided**: `FooContract`, `BarRegistry`, `WorkerRouter` (frozen type names)
+- **Interfaces consumed**: (none)
+- **Parallel-safe**: no (terminal in preamble position — no downstream lane modifies SL-0's files)
+- **Tasks**: one test task pinning the frozen type shapes; one impl task adding the stubs; one verify task
+```
+
+Downstream lanes depend on `SL-0` and consume its frozen interfaces; they must not list any SL-0 owned file in their own `Owned files`.
 
 ### Step 4 — Lane decomposition (main thread)
 
@@ -158,6 +194,8 @@ Tasks are identified `<SL-ID>.<N>`.
 
 ### Step 6 — Emit per-lane tasks via TaskCreate
 
+Plan-mode note: `TaskCreate` writes outside the scratch file and is blocked in plan mode. Author the task bodies in-thread during Step 5 so they are ready, but defer the actual `TaskCreate` invocations until AFTER `ExitPlanMode` approval (Step 8).
+
 For each lane, emit one `TaskCreate`:
 
 - **Title**: `<SL-ID> — <lane name>`
@@ -167,18 +205,19 @@ This makes the lane DAG visible in the user's task pane and becomes the hand-off
 
 ### Step 7 — Write plan doc
 
-Write to both:
+Draft the plan in the plan-mode scratch file only. The scratch-file path is given in the plan-mode system reminder — do not guess it. Do NOT write to `plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` yet; plan mode forbids writes outside the scratch file. The project-path copy + commit happens in the Close-out "Commit artifact" section after `ExitPlanMode` approval.
 
-1. `plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` in the current project.
-2. The plan-mode scratch file path (found in the plan-mode system reminder — do not guess the path).
-
-Then validate:
+Then validate the scratch draft. If `scripts/validate_plan_doc.py` exists (shell test `[ -f scripts/validate_plan_doc.py ]`), run it against the scratch file and fix any errors before `ExitPlanMode`:
 
 ```
-python scripts/validate_plan_doc.py plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md
+python scripts/validate_plan_doc.py <scratch-file-path>
 ```
 
-Fix any errors before calling `ExitPlanMode`. The validator checks required headings, disjoint file ownership, DAG acyclicity, grep-assertion-paired-with-tests, and eager-reexport risks.
+Otherwise walk the Lane validation checklist by hand and note manual verification in the post-approval commit message or Execution Notes. The validator checks required headings, disjoint file ownership, DAG acyclicity, grep-assertion-paired-with-tests, and eager-reexport risks.
+
+### Step 7.75 — Advisor review
+
+After the plan doc is drafted in the scratch file and before `ExitPlanMode`, call `advisor()`. Expect 1–4 contract-tightening suggestions per run, typically covering: under-specified freezes, asserted-but-unverified file paths, test-outline mechanism gaps, and spec-vs-contract conflicts. Apply the findings to the scratch draft before calling `ExitPlanMode`.
 
 ### Step 7.5 — External CLI review (only if `--review-external`)
 
@@ -197,7 +236,7 @@ Tell the user: "Review written to `plans/phase-plan-<VERSION>-<PHASE_ALIAS>_revi
 
 ### Step 8 — ExitPlanMode
 
-Call `ExitPlanMode`. The plan doc is the approval surface.
+Call `ExitPlanMode`. The plan doc is the approval surface. After approval, execute the deferred actions in this order: Close-out "Commit artifact" (writes the project-path `plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` and commits), then Step 6 `TaskCreate` invocations, then Close-out "Reflection + Handoff".
 
 ## Plan document template
 
@@ -233,7 +272,7 @@ SL-2 — <lane name>
 
 ### SL-1 — <lane name>
 - **Scope**: <one sentence>
-- **Owned files**: `path/one/**`, `path/two/*.ts`
+- **Owned files**: `path/one/**`, `path/two/*.ts` (MUST be a single-line inline bullet, comma-separated backticked globs; do NOT use nested sub-bullets — the downstream file-touch auditor expects inline form)
 - **Interfaces provided**: `FooContract`, `POST /api/bar`
 - **Interfaces consumed**: (none)
 - **Tasks**:
@@ -280,6 +319,8 @@ SL-2 — <lane name>
 | Cross-repo freeze | `IF-XR-<N>` | `IF-XR-2` |
 
 Defaults only — if the spec already uses its own identifiers (e.g., `P1-SL-AUTH-01`), adopt those verbatim.
+
+Any non-numeric lane alias (e.g., `SL-docs`) must still appear in the machine-readable `## Lane Index & Dependencies` block as `SL-<N>` for compatibility with downstream audit/validator tooling that expects `SL-\d+`. Its `Depends on:` line must be on its own line (not inlined with prose that could regex-match as a dependency). The alias (e.g., `SL-docs`) remains valid as the author-facing lane heading in `## Lanes`.
 
 ## Task types & dependency rules
 
@@ -337,6 +378,7 @@ Applied by the main thread after `--consensus` Step 3a:
 Before writing the plan doc, verify:
 
 - [ ] **Disjoint file ownership** — no two lanes' `Owned files` globs intersect. For generated files, call out shared-generated status in Execution Notes.
+- [ ] **Owned files is inline, one line** — no nested bullets; comma-separated backticked globs.
 - [ ] **DAG has no cycles** — a topological sort of `Depends on:` succeeds.
 - [ ] **Every `impl` task has a preceding `test` task** in the same lane.
 - [ ] **Every acceptance criterion is a testable assertion**, not prose. "Users can log in" is not testable; "`POST /api/auth` returns 200 with a valid session cookie for a registered user" is.
@@ -382,15 +424,66 @@ After `ExitPlanMode` is approved, before exiting:
 
 ## Close-out — Reflection + Handoff
 
-After artifacts are committed, resolve paths:
+After artifacts are committed, resolve paths. Treat `_shared/next_reflection_path.py` as optional-if-present: check existence, use it when available, otherwise fall back to an inline date-based filename.
 
 ```bash
-REFLECTION_PATH=$(python3 ~/.claude/skills/_shared/next_reflection_path.py plan-phase)
+HELPER=~/.claude/skills/_shared/next_reflection_path.py
+if [ -f "$HELPER" ]; then
+  REFLECTION_PATH=$(python3 "$HELPER" plan-phase)
+else
+  REFLECTION_PATH=~/.claude/skills/plan-phase/reflections/reflection-$(date -u +%Y-%m-%dT%H-%M-%SZ).md
+fi
 HANDOFF_PATH=~/.claude/skills/plan-phase/handoff.md
 SKILL_MD=~/.claude/skills/plan-phase/SKILL.md
 ```
 
-Spawn ONE close-out agent using the `frontier` tier. It writes BOTH files directly via the Write tool:
+Primary path: the orchestrator writes BOTH files directly with the Write tool. Before writing either file, ensure the plan doc has been committed in the preceding Close-out "Commit artifact" section so the deliverable persists.
+
+FILE 1 — REPO-AGNOSTIC reflection → `<REFLECTION_PATH>`:
+
+```markdown
+# plan-phase reflection — <ISO timestamp>
+
+## What worked
+- <bullet, about the SKILL's instructions>
+
+## Improvements to SKILL.md
+- <specific, actionable change to the instructions>
+```
+
+Do NOT reference this project, codebase, filenames, or domain in FILE 1. Feedback is about how the skill's instructions performed, for a future meta-skill that digests reflections across runs.
+
+FILE 2 — REPO-SPECIFIC handoff → `<HANDOFF_PATH>` (overwrites any prior handoff from this skill):
+
+```markdown
+---
+from: plan-phase
+timestamp: <ISO>
+artifact: <absolute path to plan doc + reviews if any>
+---
+
+# Handoff for execute-phase
+
+## Summary
+<2-3 sentences: phase planned, lanes count, plan doc path.>
+
+## Key decisions made this run
+- <numbered, one line each — lane boundaries, IF-freeze signatures, consensus outcomes if --consensus was used>
+
+## Open items for execute-phase
+- <concrete — e.g., "SL-2 depends on SL-1's StoreRegistry.get signature; ensure lane ordering in dispatch">
+
+## Repo-specific gotchas surfaced
+- <quirks of THIS codebase discovered during planning>
+
+## Files committed this run
+- <path> @ <commit sha>
+
+## Execute-phase's likely scope
+- <file globs from Owned files across lanes>
+```
+
+Optional alternative: when fresh-context independent review is desired, the orchestrator MAY instead spawn ONE close-out agent using the `frontier` tier with the prompt below. Use this only when the orchestrator wants a clean-context review of the transcript before writing.
 
 ```
 Agent(
@@ -399,57 +492,13 @@ Agent(
   name: "plan-phase-closeout",
   prompt: """
     Review the skill at <SKILL_MD> and the current execution transcript.
-    Produce TWO files via the Write tool.
-
-    FILE 1 — REPO-AGNOSTIC reflection → write to <REFLECTION_PATH>
-
-      # plan-phase reflection — <ISO timestamp>
-
-      ## What worked
-      - <bullet, about the SKILL's instructions>
-
-      ## Improvements to SKILL.md
-      - <specific, actionable change to the instructions>
-
-      Do NOT reference this project, codebase, filenames, or domain.
-      Feedback is about how the skill's instructions performed, for a
-      future meta-skill that digests reflections across runs.
-
-    FILE 2 — REPO-SPECIFIC handoff → write to <HANDOFF_PATH> (overwrites
-    any prior handoff from this skill)
-
-      ---
-      from: plan-phase
-      timestamp: <ISO>
-      artifact: <absolute path to plan doc + reviews if any>
-      ---
-
-      # Handoff for execute-phase
-
-      ## Summary
-      <2-3 sentences: phase planned, lanes count, plan doc path.>
-
-      ## Key decisions made this run
-      - <numbered, one line each — lane boundaries, IF-freeze signatures,
-        consensus outcomes if --consensus was used>
-
-      ## Open items for execute-phase
-      - <concrete — e.g., "SL-2 depends on SL-1's StoreRegistry.get
-        signature; ensure lane ordering in dispatch">
-
-      ## Repo-specific gotchas surfaced
-      - <quirks of THIS codebase discovered during planning>
-
-      ## Files committed this run
-      - <path> @ <commit sha>
-
-      ## Execute-phase's likely scope
-      - <file globs from Owned files across lanes>
+    Produce the two files above (same schemas) via the Write tool to
+    <REFLECTION_PATH> and <HANDOFF_PATH>.
   """
 )
 ```
 
-After the agent returns, print to the user:
+After the files are written, print to the user:
 
 > Plan written to `<plan-doc-path>`.
 > Reflection saved to `<REFLECTION_PATH>`.

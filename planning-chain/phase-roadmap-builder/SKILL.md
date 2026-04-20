@@ -29,6 +29,14 @@ Produces the `specs/phase-plans-v<N>.md` roadmap that `/plan-phase` consumes. Di
 | `--append` | no | Force append mode even if the resolved output path is new (rare). |
 | `--review-external` | no | After writing the roadmap, run Gemini + Codex CLIs in parallel to review it. Requires `gemini` and `codex` installed and authenticated. Produces a `_reviews.md` sibling file. |
 
+## Prerequisites
+
+Expected helpers under `.claude/skills/_shared/` (check existence before invocation; fall back inline when absent):
+
+- `_shared/scaffold_docs_catalog.py` — scaffolds the docs catalog. On absence, create `.claude/docs-catalog.json` manually as an empty-array JSON file (`[]`).
+- `_shared/next_reflection_path.py` — resolves the next reflection filename. On absence, use `~/.claude/skills/phase-roadmap-builder/reflections/reflection-$(date -u +%Y-%m-%dT%H-%M-%SZ).md`.
+- `_shared/review_with_cli.py` — used only with `--review-external`; required for that flag.
+
 ## Mode detection
 
 Resolve the output path in this order:
@@ -54,6 +62,8 @@ Check for `~/.claude/skills/execute-phase/handoff.md`. If it exists, `Read` it i
 
 If the handoff's metadata header is older than 7 days or the `from:` field is not `execute-phase`, flag via `AskUserQuestion` with `[use anyway, ignore, abort]`.
 
+Parse the handoff's `artifact:` field and verify at least one referenced path resolves under `$(git rev-parse --show-toplevel)`. On cross-project mismatch, surface `AskUserQuestion` with `[use anyway, ignore, abort]` rather than proceeding silently.
+
 If absent, proceed — this run is standalone.
 
 ### Step 1 — Gather inputs
@@ -69,13 +79,19 @@ Do not grep the repo for additional material. If context is insufficient, stop a
 
 ### Step 1a — Ensure docs catalog exists
 
-Run:
+Check for the helper before invoking:
 
 ```bash
-python3 "$(git rev-parse --show-toplevel)/.claude/skills/_shared/scaffold_docs_catalog.py"
+HELPER="$(git rev-parse --show-toplevel)/.claude/skills/_shared/scaffold_docs_catalog.py"
+if [ -f "$HELPER" ]; then
+  python3 "$HELPER"
+else
+  CATALOG="$(git rev-parse --show-toplevel)/.claude/docs-catalog.json"
+  [ -f "$CATALOG" ] || echo '[]' > "$CATALOG"
+fi
 ```
 
-Scaffolds `.claude/docs-catalog.json` if absent; no-op if already present. The catalog drives the `SL-docs` lane that `plan-phase` constructs for every phase. Existence matters more than content at this stage — the catalog will be refreshed (`--rescan`) by each `SL-docs` lane as the roadmap executes.
+Scaffolds `.claude/docs-catalog.json` if absent; no-op if already present. On helper absence, seed the catalog manually as an empty-array JSON file. The catalog drives the `SL-docs` lane that `plan-phase` constructs for every phase. Existence matters more than content at this stage — the catalog will be refreshed (`--rescan`) by each `SL-docs` lane as the roadmap executes.
 
 ### Step 2 — Synthesize top-of-document sections
 
@@ -98,6 +114,8 @@ Apply the heuristics in `references/parallelization-heuristics.md` in order:
 5. **Every phase decomposes into ≥2 lanes** unless it is a preamble / interface-freeze-only phase (Phase 1 / P0 are the common exceptions). Single-lane phases are a code smell — merge or split.
 6. **Each phase's `Scope notes` lists explicit parallelism hints**: suggested lane count, candidate disjoint-file partitions, and any single-writer files that would serialize lanes if ignored.
 7. **Identify cross-phase parallelism.** Phases with no shared ancestor in the DAG can run concurrently. Call these out in the DAG.
+8. **Day-1 intra-phase freeze publication.** When one lane's output shape can be published before its implementation lands, declare the shape as an intra-phase freeze so sibling lanes start against the contract rather than waiting.
+9. **Soft upper bound on lanes per phase.** When a phase would contain more than 6–8 lanes AND the lanes partition into independent subtrees sharing no intra-phase freeze, split into sibling phases. When the lanes share intra-phase freezes, keep them in one phase regardless of count.
 
 ### Step 4 — Draft Top Interface-Freeze Gates
 
@@ -112,7 +130,7 @@ Use the skeleton from `references/roadmap-template.md`. Each phase MUST contain:
 - `**Scope notes**` — lane decomposition hints, parallelism advice, edge cases.
 - `**Non-goals**` — explicitly deferred.
 - `**Key files**` — paths the phase touches.
-- `**Depends on**` — upstream phase aliases, or `(none)` for roots.
+- `**Depends on**` — upstream phase aliases, or `(none)` for roots. Root phases use the exact form `- (none)` with no trailing prose; put explanatory notes on a following bullet or in `Scope notes`.
 - `**Produces**` — `IF-0-<ALIAS>-<N>` entries for freezes this phase publishes.
 
 Phase heading format: `### Phase N — <Name> (<ALIAS>)`. Alias is short, mnemonic, alphanumeric (`P1`, `P2A`, `P2B`, `P3`, …). It becomes the filename token in `phase-plan-v<N>-<alias>.md`.
@@ -138,7 +156,7 @@ Fix every reported error before handing off. The validator enforces: required he
 
 ### Step 8.5 — External CLI review (only if `--review-external`)
 
-After the roadmap is written and validated, run:
+Requires `_shared/review_with_cli.py` (see Prerequisites). After the roadmap is written and validated, run:
 
 ```bash
 python3 "$(git rev-parse --show-toplevel)/.claude/skills/_shared/review_with_cli.py" \
@@ -210,15 +228,72 @@ After `ExitPlanMode` is approved, before exiting:
 
 ## Close-out — Reflection + Handoff
 
+Commit the roadmap/plan artifacts before writing either close-out file so the deliverable persists even if close-out is interrupted.
+
 After artifacts are committed, resolve paths:
 
 ```bash
-REFLECTION_PATH=$(python3 ~/.claude/skills/_shared/next_reflection_path.py phase-roadmap-builder)
+REFLECTION_HELPER=~/.claude/skills/_shared/next_reflection_path.py
+if [ -f "$REFLECTION_HELPER" ]; then
+  REFLECTION_PATH=$(python3 "$REFLECTION_HELPER" phase-roadmap-builder)
+else
+  REFLECTION_DIR=~/.claude/skills/phase-roadmap-builder/reflections
+  mkdir -p "$REFLECTION_DIR"
+  REFLECTION_PATH="$REFLECTION_DIR/reflection-$(date -u +%Y-%m-%dT%H-%M-%SZ).md"
+fi
 HANDOFF_PATH=~/.claude/skills/phase-roadmap-builder/handoff.md
 SKILL_MD=~/.claude/skills/phase-roadmap-builder/SKILL.md
 ```
 
-Spawn ONE close-out agent using the `frontier` tier (resolve via `execute-phase` Model tiers table). It writes BOTH files directly via the Write tool:
+Write BOTH files directly via the Write tool — this is the primary path.
+
+FILE 1 — REPO-AGNOSTIC reflection → write to `<REFLECTION_PATH>`
+
+```
+# phase-roadmap-builder reflection — <ISO timestamp>
+
+## What worked
+- <bullet, about the SKILL's instructions>
+
+## Improvements to SKILL.md
+- <specific, actionable change to the instructions>
+```
+
+Do NOT reference this project, codebase, filenames, or domain in FILE 1. Feedback is about how the skill's instructions performed, for a future meta-skill that digests reflections across runs.
+
+FILE 2 — REPO-SPECIFIC handoff → write to `<HANDOFF_PATH>` (overwrites any prior handoff from this skill)
+
+```
+---
+from: phase-roadmap-builder
+timestamp: <ISO>
+artifact: <absolute path(s) to roadmap spec + any reviews written>
+---
+
+# Handoff for the next skill
+
+## Summary
+<2-3 sentences: what was produced, where to find it.>
+
+## Key decisions made this run
+- <numbered, one line each>
+
+## Open items for the next skill
+- <concrete, actionable — e.g., "Lane SL-3 expects the
+  plugins_for(repo_id) signature from IF-0-P3-1; verify it
+  before planning P4">
+
+## Repo-specific gotchas surfaced
+- <things that surprised this run; quirks of THIS codebase>
+
+## Files committed this run
+- <path> @ <commit sha>
+
+## Next skill's likely scope
+- <best-effort forecast of which files/paths the next skill will touch>
+```
+
+Optionally delegate to a spawned frontier-tier Agent instead when independent review with a fresh context window is desired (e.g., after complex runs). Resolve the model via the `execute-phase` Model tiers table:
 
 ```
 Agent(
@@ -227,57 +302,13 @@ Agent(
   name: "phase-roadmap-builder-closeout",
   prompt: """
     Review the skill at <SKILL_MD> and the current execution transcript.
-    Produce TWO files, written via the Write tool.
-
-    FILE 1 — REPO-AGNOSTIC reflection → write to <REFLECTION_PATH>
-
-      # phase-roadmap-builder reflection — <ISO timestamp>
-
-      ## What worked
-      - <bullet, about the SKILL's instructions>
-
-      ## Improvements to SKILL.md
-      - <specific, actionable change to the instructions>
-
-      Do NOT reference this project, codebase, filenames, or domain. Feedback
-      is about how the skill's instructions performed, for a future meta-skill
-      that digests reflections across runs.
-
-    FILE 2 — REPO-SPECIFIC handoff → write to <HANDOFF_PATH> (overwrites
-    any prior handoff from this skill)
-
-      ---
-      from: phase-roadmap-builder
-      timestamp: <ISO>
-      artifact: <absolute path(s) to roadmap spec + any reviews written>
-      ---
-
-      # Handoff for the next skill
-
-      ## Summary
-      <2-3 sentences: what was produced, where to find it.>
-
-      ## Key decisions made this run
-      - <numbered, one line each>
-
-      ## Open items for the next skill
-      - <concrete, actionable — e.g., "Lane SL-3 expects the
-        plugins_for(repo_id) signature from IF-0-P3-1; verify it
-        before planning P4">
-
-      ## Repo-specific gotchas surfaced
-      - <things that surprised this run; quirks of THIS codebase>
-
-      ## Files committed this run
-      - <path> @ <commit sha>
-
-      ## Next skill's likely scope
-      - <best-effort forecast of which files/paths the next skill will touch>
+    Write FILE 1 to <REFLECTION_PATH> and FILE 2 to <HANDOFF_PATH> using
+    the schemas defined in the SKILL's Close-out section.
   """
 )
 ```
 
-After the agent returns, print to the user:
+After the files are written, print to the user:
 
 > Roadmap written to `<spec-path>`.
 > Reflection saved to `<REFLECTION_PATH>`.
