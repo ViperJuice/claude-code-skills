@@ -7,7 +7,7 @@ description: "Claude Code executor for a claude-plan-phase lane plan. Uses TeamC
 
 ## Runtime State
 
-For reflections, handoffs, and latest handoff pointers, follow `runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
+For reflections, handoffs, and latest handoff pointers, follow `claude-config/shared/runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
 
 Follow-on executor for `/claude-plan-phase`. Consumes the plan doc + TaskCreate'd lane tasks and drives them to completion: root lanes first, parallel lanes in parallel, auto-merge on green, retry-once on failure, halt-all on second failure.
 
@@ -121,6 +121,7 @@ Build the lane graph. Topologically sort it; reject on cycle with a clear error.
 - **Run `scripts/verify_harness.sh <merge-target>`.** Enforces the hard gates: git + git-worktree available, inside a work tree, merge-target branch exists locally, working tree clean (allowlist: `.claude/worktrees/`, `.claude/claude-execute-phase-state.json`), `.gitignore` covers worktree paths. **Non-zero exit blocks dispatch.** On dirty-tree failure, invoke `AskUserQuestion` with `[commit the changes as a chore, stash for the duration of the phase, abort /claude-execute-phase]` and take the user's answer. No override.
 - Record merge target = current branch (or `$EXECUTE_MERGE_TARGET`).
 - Sanity check: every symbol appearing in any lane's `Interfaces consumed` must either be produced by an upstream lane's `Interfaces provided` OR be pre-existing (skip unknown symbols with a warning, don't hard-fail).
+- Producer-dependency check: if a lane consumes another lane's findings, interfaces, or artifacts, that producer lane must appear in `Depends on`. If a lane writes a synthesized artifact, it must be downstream of every producer lane it summarizes. Missing dependencies block execution until the plan is corrected.
 - If `--dry-run`: print the topological schedule with per-lane model/thinking assignments (see Step 3) and stop here.
 
 ### Step 2.5 — Baseline-capture
@@ -188,7 +189,7 @@ State per lane: `pending | running | verify-ok | merged | failed`. State per gat
 
 Repeat until all lanes are `merged` or halt is triggered:
 
-1. **Find ready lanes** — `pending` lanes whose upstream lanes are all `merged` AND all consumed `IF-0-*` gates are `closed`. Cap the dispatch batch at `EXECUTE_MAX_PARALLEL_LANES` (default 4). Slice the eligible set to the first N (lower SL-ID first) and queue the rest.
+1. **Find ready lanes** — `pending` lanes whose upstream lanes are all `merged` AND all consumed `IF-0-*` gates are `closed`. Synthesized artifact writer lanes are ready only after every producer lane named in `Interfaces consumed` is merged. Cap the dispatch batch at `EXECUTE_MAX_PARALLEL_LANES` (default 4). Slice the eligible set to the first N (lower SL-ID first) and queue the rest.
 
 2. **Allocate worktree names**. For each ready lane, run `scripts/allocate_worktree_name.sh <sl-id>`. Substitute the emitted name (e.g., `lane-sl-1-20260418T144536-nxz5`) into both `Agent(name=…)` and the briefed `EnterWorktree(name=…)`. Bare `lane-<sl-id>` names collide under rapid dispatch.
 
