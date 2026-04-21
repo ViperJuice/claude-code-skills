@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
-# Install claude-code-skills into ~/.claude/skills/ or a project's .claude/skills/.
+# Install claude-code-skills into $HOME/.claude/skills/ or a project-local skills dir.
 #
 # Usage:
-#   ./install.sh              # install to ~/.claude/skills/ (user scope)
-#   ./install.sh .claude      # install to ./.claude/skills/ (project scope)
-#
-# Creates symlinks (not copies) so `git pull` in this repo updates installed
-# skills immediately. Use `./install.sh --copy` if you prefer copies.
+#   ./install.sh              # install to $HOME/.claude/skills/
+#   ./install.sh .claude      # install to ./.claude/skills/ for a project
+#   ./install.sh --copy       # copy instead of symlink
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 MODE="symlink"
 TARGET_BASE="$HOME/.claude"
 
@@ -19,7 +16,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --copy) MODE="copy"; shift ;;
         --help|-h)
-            head -10 "$0" | sed 's|^# ||; s|^#$||'
+            sed -n '1,12p' "$0" | sed 's|^# ||; s|^#$||'
             exit 0
             ;;
         *) TARGET_BASE="$(cd "$1" && pwd)"; shift ;;
@@ -43,39 +40,29 @@ install_entry() {
 
 echo "Installing claude-code-skills to: $SKILLS_DIR"
 
-# Planning chain
-for d in "$REPO_ROOT"/planning-chain/*/; do
-    [[ -d "$d" ]] || continue
-    install_entry "${d%/}" "$SKILLS_DIR/$(basename "$d")"
+for group in planning-chain meta efficiency-kit; do
+    [[ -d "$REPO_ROOT/$group" ]] || continue
+    for d in "$REPO_ROOT/$group"/*/; do
+        [[ -d "$d" ]] || continue
+        install_entry "${d%/}" "$SKILLS_DIR/$(basename "$d")"
+    done
 done
 
-# Efficiency kit
-for d in "$REPO_ROOT"/efficiency-kit/*/; do
-    [[ -d "$d" ]] || continue
-    install_entry "${d%/}" "$SKILLS_DIR/$(basename "$d")"
-done
+if [[ -d "$REPO_ROOT/tools" ]]; then
+    mkdir -p "$SKILLS_DIR/_shared"
+    for f in "$REPO_ROOT"/tools/*.py; do
+        [[ -f "$f" ]] || continue
+        if [[ "$MODE" == "symlink" ]]; then
+            ln -sf "$f" "$SKILLS_DIR/_shared/$(basename "$f")"
+        else
+            cp "$f" "$SKILLS_DIR/_shared/$(basename "$f")"
+        fi
+        echo "  $MODE: $SKILLS_DIR/_shared/$(basename "$f")"
+    done
+fi
 
-# Meta-skills (skill-improvement-planner + skill-editor)
-for d in "$REPO_ROOT"/meta/*/; do
-    [[ -d "$d" ]] || continue
-    install_entry "${d%/}" "$SKILLS_DIR/$(basename "$d")"
-done
-
-# Shared tools — land at .claude/skills/_shared/ to match the paths in SKILL.md
-mkdir -p "$SKILLS_DIR/_shared"
-for f in "$REPO_ROOT"/tools/*.py; do
-    [[ -f "$f" ]] || continue
-    if [[ "$MODE" == "symlink" ]]; then
-        ln -sf "$f" "$SKILLS_DIR/_shared/$(basename "$f")"
-    else
-        cp "$f" "$SKILLS_DIR/_shared/$(basename "$f")"
-    fi
-    echo "  $MODE: $SKILLS_DIR/_shared/$(basename "$f")"
-done
-
-# Template (optional reference for writing your own skills)
 install_entry "$REPO_ROOT/_template" "$SKILLS_DIR/_template"
 
 echo ""
 echo "Done. Skills installed at: $SKILLS_DIR"
-echo "See $REPO_ROOT/CONSIDERATIONS.md for prerequisites and custom-tool setup."
+echo "See $REPO_ROOT/CONSIDERATIONS.md for prerequisites and runtime-state details."

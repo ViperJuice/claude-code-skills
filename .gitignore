@@ -9,17 +9,19 @@ __pycache__/
 *~
 .DS_Store
 
-# Local testing
+# Local install/testing
 .claude/
+.codex/
+.gemini/
+.opencode/
 
-# Skill close-out artifacts (per-skill, generated each run)
+# Skill runtime artifacts
 planning-chain/*/reflections/
-planning-chain/*/handoff.md
-efficiency-kit/*/reflections/
-efficiency-kit/*/handoff.md
+planning-chain/*/handoffs/
+planning-chain/*/plans/
 meta/*/reflections/
-meta/*/handoff.md
-
-# Generated plan output (skill-improvement-planner)
+meta/*/handoffs/
 meta/*/plans/
-meta/*/applied-plans.log
+efficiency-kit/*/reflections/
+efficiency-kit/*/handoffs/
+efficiency-kit/*/plans/

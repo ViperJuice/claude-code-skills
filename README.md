@@ -1,69 +1,58 @@
 # claude-code-skills
 
-A set of [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) skills that turn a conversation about architecture into parallel, worktree-isolated execution — with an optional second-opinion review from Gemini and Codex CLIs.
+A parallel-execution planning chain and efficiency kit for Claude Code Agent Skills.
 
-## The planning chain
+This repo is the Claude Code port of the workflow skills maintained in `ViperJuice/dotfiles`. It is intentionally framework-specific: install these skills only into `$HOME/.claude/skills`, not into a shared `.agents/skills` directory.
 
-```
+## Migration note
+
+The workflow skills now use framework-prefixed names. Older Claude Code sessions may remember short names such as `plan-phase`, `execute-phase`, or `skill-editor`; the current names are `claude-plan-phase`, `claude-execute-phase`, and `claude-skill-editor`. Use the prefixed names so sessions re-vector to the correct harness-specific implementation.
+
+## Planning chain
+
+```text
 conversation or spec
         │
         ▼
-/phase-roadmap-builder   →   specs/phase-plans-v<N>.md
-        │
-        ▼ (once per phase)
-/plan-phase <ALIAS>      →   plans/phase-plan-v<N>-<alias>.md  (+ TaskCreate per lane)
+/claude-phase-roadmap-builder   ->   specs/phase-plans-v<N>.md
         │
         ▼
-/execute-phase <alias>   →   auto-merged lanes on main
+/claude-plan-phase <ALIAS>      ->   plans/phase-plan-v<N>-<alias>.md
+        │
+        ▼
+/claude-execute-phase <alias>   ->   implementation guided by the lane plan
 ```
 
-Each skill is self-contained and runs in **Claude Code's plan mode** where applicable. Phases serialize on interface freezes; lanes inside a phase are dispatched in parallel via worktree-isolated teammates. The roadmap format is designed so adjacent phases with no shared DAG ancestor can be planned and executed concurrently.
+Use `/claude-plan-detailed` by exception for one bounded change where the full roadmap/phase/lane pipeline is too heavy. Use `/claude-task-contextualizer` before writing delegated-agent briefs.
 
 ## Quick start
 
 ```bash
 git clone https://github.com/ViperJuice/claude-code-skills
 cd claude-code-skills
-./install.sh                 # installs symlinks under ~/.claude/skills/
-# Or: ./install.sh .claude   # installs under ./.claude/skills/ for a specific project
+./install.sh
 ```
 
-Then in any Claude Code session:
+Then start a Claude Code session and invoke the skills by name, for example:
 
+```text
+/claude-phase-roadmap-builder
+/claude-plan-phase P1
+/claude-execute-phase p1
 ```
-/phase-roadmap-builder        # start a new roadmap
-/plan-phase P1                # plan phase P1's lanes
-/execute-phase p1             # build it
-```
 
-## What's in the box
+## Contents
 
-- **planning-chain/** — the four flagship skills of the pipeline (`phase-roadmap-builder`, `plan-phase`, `execute-phase`, `task-contextualizer`), plus `plan-detailed`, a standalone planner used **by exception** when a change is bounded and single-concern and the full pipeline would be disproportionate.
-- **meta/** — the self-improvement loop: `skill-improvement-planner` (aggregates reflections) and `skill-editor` (applies the planner's output). Run these periodically to let the pipeline's accumulated feedback update its own instructions.
-- **tools/** — shared Python utilities: `frontier_model_discovery.py` (dynamic Gemini/Codex model resolution with 24h cache), `review_with_cli.py` (parallel cross-CLI review), `next_reflection_path.py` (incrementing reflection filename), `scaffold_docs_catalog.py` (initial + rescan of the docs catalog).
-- **efficiency-kit/** — nine short skills that prevent the most common token-wasting anti-patterns: `file-read-cache`, `safe-edit`, `batch-verify`, `smart-search`, `diagnose-bash-error`, `validate-before-bash`, `detect-environment`, `smart-screenshot`, `page-load-monitor`.
-- **_template/** — the house style for writing your own skills: imperative, directive-only, no war stories.
+- `planning-chain/` - roadmap, phase planning, execution, detailed planning, and task-contextualizer skills.
+- `meta/` - `skill-improvement-planner` and `skill-editor` for reflection-driven skill maintenance.
+- `efficiency-kit/` - short utility skills that reduce repeated reads, unsafe edits, search thrashing, and predictable verification failures.
+- `runtime-state.md` - the repo/branch/run-isolated reflection and handoff contract.
+- `_template/` - baseline style for new skills.
 
-## Prerequisites, custom tools, and nuances
+## Runtime state
 
-See [CONSIDERATIONS.md](./CONSIDERATIONS.md). In short:
-
-- **Claude Code** is the target harness. The skills use Claude Code's `Agent`, `TeamCreate`, `TaskCreate`, `EnterWorktree`, `SendMessage`, `AskUserQuestion`, `ExitPlanMode`, and `ToolSearch` tools. Anyone on Claude Code has these.
-- **External CLI review (`--review-external`, optional)** requires `gemini` and `codex` CLIs installed and authenticated.
-- **PMCP** is a custom open-source MCP gateway that provides progressive disclosure and on-demand MCP server provisioning. Required for `execute-phase`'s browser-verification step and for the `frontier_model_discovery` research pattern.
-
-## Design principles
-
-The skills follow five rules worth calling out so forks preserve them:
-
-1. **Directive-only instructions.** No war stories, no stats, no narrative justification. Rules in imperative form. Reasons stated in one clause, not paragraphs. The `_template/` directory codifies this.
-2. **Maximum parallelism.** Phases are serial checkpoints; lanes within a phase are parallel. The roadmap decomposition rules push for fewer phases with more lanes and the tightest possible early interface freezes.
-3. **Clean-tree close-out.** Every artifact-producing skill commits its output before exiting, so the next skill in the chain starts with a clean tree.
-4. **Reflection + handoff close-out.** Each artifact-producing skill writes two files at close-out: a repo-agnostic reflection (`~/.claude/skills/<skill>/reflections/<skill>-reflection-v<N>.md`, versioned) and a repo-specific handoff (`~/.claude/skills/<skill>/handoff.md`, overwritten each run, read by the next skill in the chain). The `/clear`-then-next-skill pattern lets each new agent start with a fresh context window while still picking up exactly where the previous one left off.
-
-5. **Self-improvement loop.** The reflections are fuel for `skill-improvement-planner` + `skill-editor` (see `meta/`). Periodically, the planner aggregates reflections across pipeline runs and writes a plan; the editor applies the plan and archives the reflections it consumed. The pipeline's instructions improve over time without hand-editing.
-5. **External review over multi-harness consensus.** Claude authors the plan. Gemini and Codex critique it in parallel. Agreements get attention; divergences are context for the human.
+Runtime artifacts are isolated by repo hash, branch slug, and run id. Handoffs use `latest.md` pointers under the framework-private skill root. See [CONSIDERATIONS.md](./CONSIDERATIONS.md) and [runtime-state.md](./runtime-state.md).
 
 ## Contributing
 
-Forks are encouraged. If you extend the skills, keep the directive-only style and the close-out pattern (clean-tree commit + repo-agnostic reflection). The `_template/SKILL.md` has the house rules.
+Keep skills directive-first and framework-specific. If a workflow instruction names a harness tool, runtime path, delegation primitive, or approval model, it belongs in the framework-specific repo for that harness.
