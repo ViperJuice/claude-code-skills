@@ -7,7 +7,7 @@ description: "Claude Code skill editor. Applies plans from claude-skill-improvem
 
 ## Runtime State
 
-For reflections, handoffs, and latest handoff pointers, follow `runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
+For reflections, handoffs, and latest handoff pointers, follow `claude-config/shared/runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
 
 Applies the plan produced by `claude-skill-improvement-planner` to the target SKILL.md files. Interprets each recommendation, edits the file, mirrors across repos if the skill is dual-homed, and archives the reflections the plan consumed so they won't drive another pass.
 
@@ -93,7 +93,7 @@ Dispatch in parallel where safe: multiple recommendations targeting different sk
 
 ### Step 4 — Mirror to team repo (if `--no-mirror` not set)
 
-For each successfully edited dotfiles SKILL.md at `~/code/dotfiles/claude-config/claude-skills/claude-<skill>/`, check whether a counterpart exists in `~/code/claude-code-skills/` (under `planning-chain/`, `efficiency-kit/`, or `meta/`).
+For each successfully edited dotfiles SKILL.md at `~/code/dotfiles/claude-config/skills/<skill>/`, check whether a counterpart exists in `~/code/claude-code-skills/` (under `planning-chain/`, `efficiency-kit/`, or `meta/`).
 
 - If counterpart exists → `cp` the edited SKILL.md over.
 - If absent → note in the outcome report; the skill either isn't shipped to the team repo, or is at a non-standard path the mirror didn't find.
@@ -120,7 +120,7 @@ Dotfiles:
 
 ```bash
 cd ~/code/dotfiles
-git add -A claude-config/claude-skills/
+git add -A claude-config/skills/
 git commit -m "chore(skills): apply improvement plan <plan-timestamp>
 
 Applied N of M recommendations from <plan-path>. See the plan file for

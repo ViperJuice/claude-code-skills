@@ -7,7 +7,7 @@ description: "Claude Code skill feedback aggregator. Reads workflow skill reflec
 
 ## Runtime State
 
-For reflections, handoffs, and latest handoff pointers, follow `runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
+For reflections, handoffs, and latest handoff pointers, follow `claude-config/shared/runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
 
 Reads reflection files produced by the planning-chain skills' close-out steps — plus reflections emitted by the meta-skills (`claude-skill-improvement-planner`, `claude-skill-editor`) themselves — aggregates recurring themes across runs, and writes an improvement plan. Does not edit skills. A separate `claude-skill-editor` skill ingests the plan and performs the edits. Including the meta-skills' own reflections closes the self-improvement loop so this planner and the editor can be iterated on with the same pipeline they drive.
 
@@ -213,7 +213,7 @@ New convention introduced by this skill (the downstream editor performs the move
 - Path: `~/.claude/skills/<skill>/reflections/<repo_hash>/<branch_slug>/archive/<original-filename>`
 - Directory created lazily on first archive.
 - This planner excludes `archive/` when globbing.
-- Already gitignored — `claude-config/claude-skills/*/reflections/` in dotfiles covers `archive/` as a subpath.
+- Already gitignored — `claude-config/skills/*/reflections/` in dotfiles covers `archive/` as a subpath.
 
 ## Best practices followed
 

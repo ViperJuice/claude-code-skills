@@ -7,7 +7,7 @@ description: "Claude Code roadmap planner. Produces or extends a multi-phase roa
 
 ## Runtime State
 
-For reflections, handoffs, and latest handoff pointers, follow `runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
+For reflections, handoffs, and latest handoff pointers, follow `claude-config/shared/runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
 
 Produces the `specs/phase-plans-v<N>.md` roadmap that `/claude-plan-phase` consumes. Digests the prior conversation and any markdown files the user points at, then writes a phased roadmap whose structure maximizes parallel execution. Creates a new roadmap if none exists; appends phases (never edits existing phases) if one does.
 

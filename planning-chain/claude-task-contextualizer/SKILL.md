@@ -7,7 +7,7 @@ description: "Guide for preparing rich context when spawning subagent tasks. Use
 
 ## Runtime State
 
-For reflections, handoffs, and latest handoff pointers, follow `runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
+For reflections, handoffs, and latest handoff pointers, follow `claude-config/shared/runtime-state.md`. This repo/branch/run-isolated contract supersedes any older flat closeout examples retained for historical context in this skill.
 
 Subagents do not inherit parent context. Brief every Task call with specific file paths, architecture, and scope so the subagent can start work immediately instead of rediscovering the project.
 

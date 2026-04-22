@@ -35,6 +35,10 @@ Default install target: `$HOME/.claude/skills`.
 
 These framework-specific skills are intentionally not installed into `~/.agents/skills`. That directory should be reserved for future skills that are genuinely platform-neutral.
 
+## Permission settings
+
+Dotfiles manages narrow Claude Code permissions for generated runtime artifacts in `claude-config/settings.json` and host overlays. The allowlist should cover only `reflections/`, `handoffs/`, and `plans/` under `$HOME/.claude/skills/<skill>/` and the corresponding dotfiles symlink targets. In Claude permission patterns, use `~` for home-relative paths or `//home/...` for absolute paths; a single leading slash is project-root-relative.
+
 ## Style
 
 Keep instructions directive-first. Avoid long narrative justification, war stories, or benchmark claims. If behavior differs between frameworks, do not hide that behind a generic skill; make an explicit framework-specific port.
