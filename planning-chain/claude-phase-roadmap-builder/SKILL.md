@@ -235,19 +235,22 @@ The output file must match `references/roadmap-template.md` structurally. `claud
 
 After approval, invoke `/claude-plan-phase <ALIAS>` per phase. Phases with no shared ancestor in the DAG can be planned and executed in parallel — note which ones in the hand-off message. The wall-clock critical path is the longest DAG path through the roadmap.
 
-## Close-out — Commit artifact (clean-tree guarantee)
+## Close-out — Stage artifact (preservation guarantee)
 
 After `ExitPlanMode` is approved, before exiting:
 
-1. `git add specs/phase-plans-v<N>.md` (and the `_reviews.md` sibling if `--review-external` produced one).
-2. `git commit -m "chore(roadmap): <create|append phases>"`.
-3. Run `git status`. If dirty outside the skill's own artifacts, surface via `AskUserQuestion` with `[commit the remaining changes as chore, stash, abort]`.
+1. Run `git status --short -- specs/phase-plans-v<N>.md` and include the `_reviews.md` sibling if `--review-external` produced one.
+2. If the roadmap or review artifact is untracked or modified and the user did not explicitly forbid staging, run `git add specs/phase-plans-v<N>.md` plus the review sibling if present.
+3. Rerun `git status --short -- specs/phase-plans-v<N>.md` and report `Artifact state: staged|tracked|modified|unstaged|blocked`.
+4. Do not commit unless the user explicitly asked for a commit.
+
+Before final response and handoff, choose the next phase to plan from the roadmap DAG. If at least one phase is ready, set `Next phase: <ALIAS> - <phase name>` and `Next command: /claude-plan-phase <ALIAS>`. If no phase should be planned next, set `Next phase: none - <reason>` and `Next command: none - <reason>`.
 
 ## Close-out — Reflection + Handoff
 
-Commit the roadmap/plan artifacts before writing either close-out file so the deliverable persists even if close-out is interrupted.
+Stage the roadmap/plan artifacts before writing either close-out file so the deliverable is preserved in the index unless the user explicitly forbade staging.
 
-After artifacts are committed, resolve paths:
+After artifacts are staged or confirmed tracked, resolve paths:
 
 ```bash
 REFLECTION_HELPER=~/.claude/skills/_shared/next_reflection_path.py
@@ -302,6 +305,10 @@ FILE 2 — REPO-SPECIFIC handoff → write to `<HANDOFF_PATH>` (per-repo slot; o
 from: claude-phase-roadmap-builder
 timestamp: <ISO>
 artifact: <absolute path(s) to roadmap spec + any reviews written>
+artifact_state: <staged|tracked|modified|unstaged|blocked>
+next_skill: <claude-plan-phase|none>
+next_command: </claude-plan-phase ALIAS|none - reason>
+next_phase: <ALIAS - phase name|none - reason>
 ---
 
 # Handoff for the next skill
@@ -320,8 +327,8 @@ artifact: <absolute path(s) to roadmap spec + any reviews written>
 ## Repo-specific gotchas surfaced
 - <things that surprised this run; quirks of THIS codebase>
 
-## Files committed this run
-- <path> @ <commit sha>
+## Planning artifacts staged this run
+- <path> @ <artifact_state>
 
 ## Next skill's likely scope
 - <best-effort forecast of which files/paths the next skill will touch>

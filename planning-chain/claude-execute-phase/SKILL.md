@@ -366,7 +366,15 @@ After all lanes merged:
 
 ### Step 9.5 — Close-out: Reflection + Handoff
 
-Commit any merge artifacts BEFORE close-out so the deliverable persists even if close-out is interrupted.
+Before close-out, run `git status --short -- <plan_path> <roadmap_path>` for every consumed or updated planning artifact. If any planning artifact is untracked or modified and the user did not explicitly forbid staging, run `git add <path>` for each artifact. Rerun status and report `Artifact state: staged|tracked|modified|unstaged|blocked` for each artifact. Do not commit unless the user explicitly asked for a commit.
+
+Determine the next step before final response and handoff:
+
+- If the current phase is incomplete or verification failed, set `Next phase: <current alias> - blocked: <blocker>` and `Next command: none - <blocker>`.
+- If another generated phase plan is ready, set `Next phase: <next alias> - execution ready` and `Next command: /claude-execute-phase <next-alias>`.
+- If the roadmap has an unplanned ready phase, set `Next phase: <next alias> - planning ready` and `Next command: /claude-plan-phase <next-alias>`.
+- If the roadmap needs extension, set `Next phase: none - roadmap extension needed` and `Next command: /claude-phase-roadmap-builder`.
+- If all phases are complete, set `Next phase: none - roadmap complete` and `Next command: none - roadmap complete`.
 
 Resolve paths, with an inline fallback for the reflection helper:
 
@@ -422,6 +430,10 @@ FILE 2 — REPO-SPECIFIC handoff → write to `<HANDOFF_PATH>` (per-repo slot; o
 from: claude-execute-phase
 timestamp: <ISO>
 artifact: <phase alias that was executed, merge-commit SHAs>
+artifact_state: <staged|tracked|modified|unstaged|blocked>
+next_skill: <claude-execute-phase|claude-plan-phase|claude-phase-roadmap-builder|none>
+next_command: </claude-execute-phase next-alias|/claude-plan-phase next-alias|/claude-phase-roadmap-builder|none - reason>
+next_phase: <next alias - status|none - reason>
 ---
 
 # Handoff for the next skill
@@ -449,6 +461,9 @@ final verification state.>
 ## Files committed this run
 - <merge-commit SHAs, with lane ID and brief description>
 
+## Planning artifacts staged this run
+- <path> @ <artifact_state>
+
 ## Next skill's likely scope
 - <forecast of what claude-plan-phase / claude-phase-roadmap-builder will touch next>
 ```
@@ -458,8 +473,11 @@ After both files are written, print to the user:
 > Phase `<alias>` complete. `<N>` lanes merged; final verification `<pass|fail>`.
 > Reflection saved to `<REFLECTION_PATH>`.
 > Handoff written to `<HANDOFF_PATH>`.
+> Artifact state: `<staged|tracked|modified|unstaged|blocked>`.
 >
-> Recommended next step: run `/clear` to reset your context window, then invoke `/claude-plan-phase <next-alias>` (or `/claude-phase-roadmap-builder` to extend the roadmap). The next skill reads the handoff automatically.
+> Next phase: `<next alias - status|none - reason>`.
+> Next command: `<exact command or none - reason>`.
+> Recommended next step: run `/clear` to reset your context window, then invoke the next command above. The next skill reads the handoff automatically.
 
 ## Lane state machine
 

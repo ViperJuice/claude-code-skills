@@ -228,7 +228,7 @@ This makes the lane DAG visible in the user's task pane and becomes the hand-off
 
 ### Step 7 — Write plan doc
 
-Draft the plan in the plan-mode scratch file only. The scratch-file path is given in the plan-mode system reminder — do not guess it. Do NOT write to `plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` yet; plan mode forbids writes outside the scratch file. The project-path copy + commit happens in the Close-out "Commit artifact" section after `ExitPlanMode` approval.
+Draft the plan in the plan-mode scratch file only. The scratch-file path is given in the plan-mode system reminder — do not guess it. Do NOT write to `plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` yet; plan mode forbids writes outside the scratch file. The project-path copy + staging happens in the Close-out "Stage artifact" section after `ExitPlanMode` approval.
 
 Then validate the scratch draft. If `scripts/validate_plan_doc.py` exists (shell test `[ -f scripts/validate_plan_doc.py ]`), run it against the scratch file and fix any errors before `ExitPlanMode`:
 
@@ -236,7 +236,7 @@ Then validate the scratch draft. If `scripts/validate_plan_doc.py` exists (shell
 python scripts/validate_plan_doc.py <scratch-file-path>
 ```
 
-Otherwise walk the Lane validation checklist by hand and note manual verification in the post-approval commit message or Execution Notes. The validator checks required headings, disjoint file ownership, DAG acyclicity, grep-assertion-paired-with-tests, and eager-reexport risks.
+Otherwise walk the Lane validation checklist by hand and note manual verification in the post-approval closeout or Execution Notes. The validator checks required headings, disjoint file ownership, DAG acyclicity, grep-assertion-paired-with-tests, and eager-reexport risks.
 
 ### Step 7.75 — Advisor review
 
@@ -259,7 +259,7 @@ Tell the user: "Review written to `plans/phase-plan-<VERSION>-<PHASE_ALIAS>_revi
 
 ### Step 8 — ExitPlanMode
 
-Call `ExitPlanMode`. The plan doc is the approval surface. After approval, execute the deferred actions in this order: Close-out "Commit artifact" (writes the project-path `plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` and commits), then Step 6 `TaskCreate` invocations, then Close-out "Reflection + Handoff".
+Call `ExitPlanMode`. The plan doc is the approval surface. After approval, execute the deferred actions in this order: Close-out "Stage artifact" (writes the project-path `plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` and stages it unless forbidden), then Step 6 `TaskCreate` invocations, then Close-out "Reflection + Handoff".
 
 ## Plan document template
 
@@ -437,19 +437,20 @@ After `ExitPlanMode` approval, three artifacts exist:
 
 Those three are the full hand-off surface — everything downstream (manual lane execution or `claude-execute-phase`) reads from them.
 
-## Close-out — Commit artifact (clean-tree guarantee)
+## Close-out — Stage artifact (preservation guarantee)
 
 After `ExitPlanMode` is approved, before exiting:
 
-1. `git add plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` (and the `_reviews.md` sibling if `--review-external` produced one).
-2. `git commit -m "chore(plan): <PHASE_ID> lane plan"`.
-3. Run `git status`. If dirty outside the skill's own artifacts, surface via `AskUserQuestion` with `[commit the remaining changes as chore, stash, abort]`.
+1. Run `git status --short -- plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` and include the `_reviews.md` sibling if `--review-external` produced one.
+2. If the plan or review artifact is untracked or modified and the user did not explicitly forbid staging, run `git add plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` plus the review sibling if present.
+3. Rerun `git status --short -- plans/phase-plan-<VERSION>-<PHASE_ALIAS>.md` and report `Artifact state: staged|tracked|modified|unstaged|blocked`.
+4. Do not commit unless the user explicitly asked for a commit.
 
-`claude-execute-phase`'s preflight will reject a dirty tree on its next invocation; this step exists to prevent that.
+When the generated plan is ready to execute, set `Next phase: <PHASE_ALIAS> - execution ready` and `Next command: /claude-execute-phase <PHASE_ALIAS>`. If execution should not start yet, set `Next phase: <PHASE_ALIAS> - blocked: <reason>` and `Next command: none - <reason>`.
 
 ## Close-out — Reflection + Handoff
 
-After artifacts are committed, resolve paths. Treat `_shared/next_reflection_path.py` as optional-if-present: check existence, use it when available, otherwise fall back to an inline date-based filename.
+After artifacts are staged or confirmed tracked, resolve paths. Treat `_shared/next_reflection_path.py` as optional-if-present: check existence, use it when available, otherwise fall back to an inline date-based filename.
 
 ```bash
 HELPER=~/.claude/skills/_shared/next_reflection_path.py
@@ -470,7 +471,7 @@ HANDOFF_PATH="$HANDOFF_DIR/latest.md"
 SKILL_MD=~/.claude/skills/claude-plan-phase/SKILL.md
 ```
 
-Primary path: the orchestrator writes BOTH files directly with the Write tool. Before writing either file, ensure the plan doc has been committed in the preceding Close-out "Commit artifact" section so the deliverable persists.
+Primary path: the orchestrator writes BOTH files directly with the Write tool. Before writing either file, ensure the plan doc has been staged in the preceding Close-out "Stage artifact" section unless the user explicitly forbade staging.
 
 FILE 1 — REPO-AGNOSTIC reflection → `<REFLECTION_PATH>`:
 
@@ -502,6 +503,10 @@ FILE 2 — REPO-SPECIFIC handoff → `<HANDOFF_PATH>` (per-repo slot; overwrites
 from: claude-plan-phase
 timestamp: <ISO>
 artifact: <absolute path to plan doc + reviews if any>
+artifact_state: <staged|tracked|modified|unstaged|blocked>
+next_skill: <claude-execute-phase|none>
+next_command: </claude-execute-phase PHASE_ALIAS|none - reason>
+next_phase: <PHASE_ALIAS - execution ready|PHASE_ALIAS - blocked: reason>
 ---
 
 # Handoff for claude-execute-phase
@@ -518,8 +523,8 @@ artifact: <absolute path to plan doc + reviews if any>
 ## Repo-specific gotchas surfaced
 - <quirks of THIS codebase discovered during planning>
 
-## Files committed this run
-- <path> @ <commit sha>
+## Planning artifacts staged this run
+- <path> @ <artifact_state>
 
 ## Execute-phase's likely scope
 - <file globs from Owned files across lanes>
